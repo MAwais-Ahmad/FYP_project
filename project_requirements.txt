@@ -1,0 +1,156 @@
+PART A: CLARIFICATION - How It Actually Works
+You're partially right but let me clarify the exact flow:
+My Recommendation: HYBRID of A + B
+Not: One long 80-question scenario
+ Not: Just 2-3 scenarios total
+Instead:
+SESSION STRUCTURE (15-20 minutes total):
+
+┌─────────────────────────────────────┐
+│ SCENARIO 1 (5-6 min)                │
+│ - AI generates story/problem        │
+│ - 4 phases of questions             │
+│ - Each phase = 1-2 questions        │
+│ - Total: 5-8 questions              │
+└─────────────────────────────────────┘
+         ↓
+   Quick Analysis
+         ↓
+┌─────────────────────────────────────┐
+│ SCENARIO 2 (5-6 min)                │
+│ - NEW story (adaptive difficulty)   │
+│ - 4 phases again                    │
+│ - 5-8 questions                     │
+│ - Difficulty adjusted based on S1   │
+└─────────────────────────────────────┘
+         ↓
+   Pattern Confirmation
+         ↓
+┌─────────────────────────────────────┐
+│ SCENARIO 3 (Optional - 4-5 min)     │
+│ - Edge case testing                 │
+│ - If patterns are unclear           │
+│ - 3-5 questions                     │
+└─────────────────────────────────────┘
+         ↓
+   FINAL CATEGORIZATION
+So Total:
+2-3 scenarios (not 10, not 1)
+Each scenario = 5-8 questions
+Total questions = 15-25 (not 80!)
+Time = 15-20 minutes
+
+
+—------------------------------------------------------------------------------------------------------------------------
+
+
+
+DETAILED SCENARIO EXAMPLE
+SCENARIO 1: "The School Festival Budget Crisis"
+Story: (AI-generated, unique each time)
+You're helping organize your school's annual festival. 
+Budget: Rs. 50,000
+5 club presidents want funding:
+- Drama Club: Rs. 20,000 (stage props)
+- Science Club: Rs. 18,000 (experiment materials)
+- Sports Club: Rs. 15,000 (equipment)
+- Art Club: Rs. 12,000 (supplies)
+- Music Club: Rs. 10,000 (instruments rental)
+
+Total requests = Rs. 75,000 (Rs. 25,000 over budget!)
+Principal needs your recommendation by tomorrow.
+PHASE 1: Understanding (2 questions)
+Q1: [Timed - 90 seconds]
+What is the main problem you need to solve?
+[Open text box]
+
+EXTRACT:
+- time_to_start_typing
+- response_length
+- identified_core_issue (yes/no)
+- mentioned_budget_constraint (yes/no)
+
+---
+
+Q2: [Timed - 60 seconds]
+Which information is MOST critical for making a decision?
+A) How much each club spent last year
+B) Which clubs have the most members
+C) What activities bring most student engagement
+D) Which club presidents asked first
+
+EXTRACT:
+- decision_time
+- choice_logic (data-driven vs emotional)
+- answer_changed (yes/no)
+PHASE 2: Planning (2 questions)
+Q3: [Timed - 2 minutes]
+List 3 possible solutions to this problem:
+[3 text boxes]
+
+EXTRACT:
+- creativity_score (unique vs obvious solutions)
+- practicality_score
+- time_distribution (equal on all 3 or rushed last one?)
+- solution_types (cut equally, prioritize, fundraise, etc.)
+
+---
+
+Q4: [Timed - 90 seconds]
+Rank your solutions from best to worst and explain why:
+[Drag-and-drop + short explanation]
+
+EXTRACT:
+- consistency_with_previous_answer
+- reasoning_depth
+- changes_made_during_ranking
+PHASE 3: Execution (2 questions)
+Q5: [Timed - 45 seconds - PRESSURE!]
+URGENT: Drama Club president just called. 
+They found cheaper props for Rs. 12,000 instead of Rs. 20,000.
+Do you:
+A) Accept immediately - more budget for others
+B) Ask if quality is same before deciding
+C) Stick to original plan - changes complicate things
+D) Ask other clubs to find cheaper options too
+
+EXTRACT:
+- reaction_speed
+- risk_tolerance
+- systematic_thinking (vs impulsive)
+
+---
+
+Q6: [Untimed]
+You allocated: Drama Rs. 12k, Science Rs. 18k, Sports Rs. 10k, Art Rs. 8k, Music Rs. 2k
+One club will be very unhappy. How will you explain this to them?
+[Text box]
+
+EXTRACT:
+- empathy_indicators
+- justification_quality
+- confidence_in_decision
+- stress_management
+PHASE 4: Reflection (1-2 questions)
+Q7: [Untimed]
+Rate your confidence in your final decision: 1-10
+How would you improve your approach if you could redo this?
+
+EXTRACT:
+- self_awareness_score
+- learning_orientation
+- perfectionism_indicators
+
+
+
+
+
+
+
+Then → SCENARIO 2 (Different story, ADAPTIVE)
+If student was fast + accurate in S1:
+Generate HARDER scenario (more variables, time pressure)
+If student was slow + struggling in S1:
+Generate EASIER scenario (clearer options, more time)
+If student was inconsistent:
+Generate scenario testing CONSISTENCY specifically
