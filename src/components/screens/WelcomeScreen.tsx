@@ -1,7 +1,9 @@
 import { useState } from 'react';
 
 interface WelcomeScreenProps {
-    onStart: (difficultyLevel: number) => void;
+    onStart: (difficultyLevel: number, name: string) => void;
+    onViewTeacherDashboard: () => void;
+    onViewStudentDashboard: () => void;
     isLoading: boolean;
 }
 
@@ -18,14 +20,21 @@ const difficultyLabels: Record<number, { label: string; emoji: string; color: st
     10: { label: 'Expert', emoji: '💀', color: 'text-red-500' },
 };
 
-export function WelcomeScreen({ onStart, isLoading }: WelcomeScreenProps) {
+export function WelcomeScreen({ onStart, onViewTeacherDashboard, onViewStudentDashboard, isLoading }: WelcomeScreenProps) {
     const [difficulty, setDifficulty] = useState(5);
+    const [name, setName] = useState('');
     const info = difficultyLabels[difficulty];
 
     return (
         <section className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
             <div className="floating-shape shape-1 w-96 h-96 bg-primary-500 -top-48 -left-48" />
             <div className="floating-shape shape-2 w-72 h-72 bg-accent-500 -bottom-36 -right-36" style={{ animationDelay: '2s' }} />
+
+            {/* Dashboard quick links */}
+            <div className="absolute top-4 right-4 z-20 flex gap-2">
+                <button onClick={onViewStudentDashboard} className="btn-secondary !py-2 !px-4 text-sm">📈 My Dashboard</button>
+                <button onClick={onViewTeacherDashboard} className="btn-secondary !py-2 !px-4 text-sm">👨‍🏫 Teacher</button>
+            </div>
 
             <div className="max-w-2xl w-full space-y-8 relative z-10">
                 {/* Title */}
@@ -74,6 +83,21 @@ export function WelcomeScreen({ onStart, isLoading }: WelcomeScreenProps) {
                     </div>
                 </div>
 
+                {/* Name */}
+                <div className="glass-card p-6 space-y-3">
+                    <h3 className="font-semibold text-center">Your Name</h3>
+                    <input
+                        type="text"
+                        value={name}
+                        onChange={e => setName(e.target.value)}
+                        placeholder="e.g., Ayesha Khan (used for your dashboard)"
+                        className="text-input"
+                    />
+                    <p className="text-white/40 text-xs text-center">
+                        Used to save your results to your personal dashboard. Leave blank to stay anonymous.
+                    </p>
+                </div>
+
                 {/* Difficulty Slider */}
                 <div className="glass-card p-6 space-y-4">
                     <h3 className="font-semibold text-center">Choose Your Starting Difficulty</h3>
@@ -105,7 +129,7 @@ export function WelcomeScreen({ onStart, isLoading }: WelcomeScreenProps) {
                 {/* Start */}
                 <div className="flex justify-center">
                     <button
-                        onClick={() => onStart(difficulty)}
+                        onClick={() => onStart(difficulty, name.trim() || 'Anonymous')}
                         disabled={isLoading}
                         className="btn-primary text-lg py-4 px-10 disabled:opacity-50 disabled:cursor-not-allowed"
                     >

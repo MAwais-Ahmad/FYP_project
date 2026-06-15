@@ -298,22 +298,20 @@ export function RankingQuestion({
 }
 
 // ─── REFLECTION QUESTION ──────────────────────────────────────────────────────
+// Improvement #3: the self-reported confidence slider has been removed.
+// Confidence is now inferred implicitly from behaviour + this reflection text.
 
 interface ReflectionQuestionProps {
     question: Question;
-    confidence: number;
-    improvement: string;
-    onConfidenceChange: (value: number) => void;
-    onImprovementChange: (text: string) => void;
+    value: string;
+    onChange: (text: string) => void;
     onFirstInteraction: () => void;
 }
 
 export function ReflectionQuestion({
     question,
-    confidence,
-    improvement,
-    onConfidenceChange,
-    onImprovementChange,
+    value,
+    onChange,
     onFirstInteraction,
 }: ReflectionQuestionProps) {
     const [hasInteracted, setHasInteracted] = useState(false);
@@ -325,80 +323,39 @@ export function ReflectionQuestion({
         }
     };
 
-    const confidenceEmoji = (v: number) => {
-        if (v <= 3) return '😟';
-        if (v <= 5) return '😐';
-        if (v <= 7) return '🙂';
-        if (v <= 9) return '😊';
-        return '🤩';
-    };
-
-    const confidenceLabel = (v: number) => {
-        if (v <= 3) return 'Not confident at all';
-        if (v <= 5) return 'Somewhat unsure';
-        if (v <= 7) return 'Fairly confident';
-        if (v <= 9) return 'Very confident';
-        return 'Completely certain';
-    };
+    const words = value.trim().split(/\s+/).filter(Boolean).length;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-5">
             <h3 className="text-xl font-medium leading-relaxed">{question.question}</h3>
 
-            {/* Confidence Slider */}
-            <div className="space-y-4">
-                <label className="block text-white/80 font-medium">
-                    1) Rate your confidence in your final decision:
-                </label>
-                <div className="space-y-3">
-                    <input
-                        type="range"
-                        min="1"
-                        max="10"
-                        value={confidence}
-                        onChange={e => {
-                            handleInteraction();
-                            onConfidenceChange(parseInt(e.target.value));
-                        }}
-                        className="confidence-slider"
-                    />
-                    <div className="flex justify-between text-xs text-white/40">
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
-                            <span
-                                key={n}
-                                className={confidence === n ? 'text-primary-400 font-bold' : ''}
-                            >
-                                {n}
-                            </span>
-                        ))}
-                    </div>
-                    <div className="flex items-center justify-center gap-3">
-                        <span className="text-3xl">{confidenceEmoji(confidence)}</span>
-                        <div className="text-center">
-                            <span className="inline-block px-5 py-2 rounded-full bg-gradient-to-r from-primary-500 to-accent-500 font-bold text-2xl">
-                                {confidence}
-                            </span>
-                            <p className="text-white/50 text-sm mt-1">{confidenceLabel(confidence)}</p>
-                        </div>
-                    </div>
-                </div>
+            <div className="flex items-start gap-3 p-3 rounded-xl bg-primary-500/10 border border-primary-400/20 text-sm text-white/60">
+                <span className="text-lg">🪞</span>
+                <span>
+                    Be honest — there are no marks here. Your confidence is measured automatically
+                    from how you worked through the round, so just reflect genuinely.
+                </span>
             </div>
 
-            {/* Improvement Textarea */}
             <div className="space-y-3">
                 <label className="block text-white/80 font-medium">
-                    2) What would you do differently if you repeated this?
+                    Looking back, what would you do differently and why?
                 </label>
-                <textarea
-                    className="text-input"
-                    value={improvement}
-                    onChange={e => {
-                        handleInteraction();
-                        onImprovementChange(e.target.value);
-                    }}
-                    placeholder="Reflect honestly — what would you change about your approach, process, or priorities?"
-                    rows={5}
-                />
+                <div className="relative">
+                    <textarea
+                        className="text-input"
+                        value={value}
+                        onChange={e => {
+                            handleInteraction();
+                            onChange(e.target.value);
+                        }}
+                        placeholder="Reflect honestly — what would you change about your approach, process, or priorities, and why?"
+                        rows={6}
+                    />
+                    <span className="absolute bottom-3 right-3 text-white/40 text-sm">
+                        {words} word{words === 1 ? '' : 's'}
+                    </span>
+                </div>
             </div>
         </div>
     );

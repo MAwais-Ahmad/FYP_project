@@ -9,7 +9,22 @@ import {
     ScreenType,
 } from '../types/quiz.types';
 import { generateScenario as apiGenerateScenario, evaluateScenario as apiEvaluateScenario } from '../services/api';
-import { calculatePerformanceScore, determineDifficultySignal } from '../utils/classifyLearner';
+import {
+    calculateDynamicConfidence,
+    calculatePerformanceScore,
+    determineDifficultySignal,
+    heuristicCognitiveFeatures,
+} from '../utils/classifyLearner';
+
+// Extract the reflection free-text answer (used for implicit confidence scoring)
+function getReflectionText(answers: Answers, questions: Question[]): string {
+    const reflectionQ = questions.find(q => q.type === 'reflection');
+    if (!reflectionQ) return '';
+    const raw = answers[reflectionQ.id];
+    if (Array.isArray(raw)) return raw.join(' ');
+    if (typeof raw === 'string') return raw.includes('|') ? raw.split('|').slice(1).join(' ') : raw;
+    return '';
+}
 
 // ─── FALLBACK ────────────────────────────────────────────────────────────────
 const getFallbackData = (): { scenario: Scenario; questions: Question[] } => ({
@@ -49,6 +64,9 @@ export function useQuizState() {
     const [difficultyLevel, setDifficultyLevel] = useState(5);
     const [scenarioResults, setScenarioResults] = useState<ScenarioResult[]>([]);
 
+    // Student identity (for dashboards / persistence)
+    const [studentName, setStudentName] = useState('');
+
     // Cost tracking
     const [tokensUsed, setTokensUsed] = useState(0);
     const [totalCost, setTotalCost] = useState(0);
@@ -85,7 +103,8 @@ export function useQuizState() {
     );
 
     // ── START (from welcome screen with chosen difficulty) ─────────────────────
-    const startQuiz = useCallback(async (chosenDifficulty: number) => {
+    const startQuiz = useCallback(async (chosenDifficulty: number, name?: string) => {
+        if (name !== undefined) setStudentName(name);
         setCurrentScenarioNumber(1);
         setDifficultyLevel(chosenDifficulty);
         setScenarioResults([]);
@@ -95,29 +114,41 @@ export function useQuizState() {
         setScreen('quiz');
     }, [loadScenario]);
 
+    // ── DASHBOARD NAVIGATION (Improvement #6) ──────────────────────────────────
+    const showStudentDashboard = useCallback(() => setScreen('student-dashboard'), []);
+    const showTeacherDashboard = useCallback(() => setScreen('teacher-dashboard'), []);
+    const goToWelcome = useCallback(() => setScreen('welcome'), []);
+
     // ── COMPLETE ITERATION (saves results, shows inter-scenario) ──────────────
     const completeScenario = useCallback(
-        async (overallMetrics: OverallMetrics, confidence: number) => {
+        async (overallMetrics: OverallMetrics) => {
             setIsLoading(true);
+            const reflectionText = getReflectionText(answers, questions);
             try {
                 // Fetch GPT evaluation for accuracy and cognitive features
                 const evaluationData = await apiEvaluateScenario(scenario, questions, answers);
-                
+
                 if (evaluationData.success) {
                     setTokensUsed(prev => prev + evaluationData.usage.tokens);
                     setTotalCost(prev => prev + evaluationData.usage.estimatedCost);
                 }
 
                 const accuracyScore = evaluationData.success ? evaluationData.evaluation.accuracy_score : 0.5;
-                const cognitiveFeatures = evaluationData.success ? evaluationData.evaluation.cognitive_features : {
-                    reflection_depth: 0.5,
-                    self_awareness: 0.5,
-                    learning_orientation: 0.5,
-                    creativity_score: 0.5,
-                    insights: ['Evaluation failed or skipped.'],
-                };
+                // Hybrid pipeline: trust the LLM when it succeeds, otherwise fall
+                // back to reliable client-side heuristics instead of flat 0.5s.
+                const cognitiveFeatures = evaluationData.success
+                    ? evaluationData.evaluation.cognitive_features
+                    : heuristicCognitiveFeatures(answers, questions);
 
-                const perfScore = calculatePerformanceScore(overallMetrics, confidence, accuracyScore);
+                // Implicit, behaviour-driven confidence (no self-report slider)
+                const confidence = calculateDynamicConfidence(
+                    overallMetrics,
+                    difficultyLevel,
+                    accuracyScore,
+                    reflectionText
+                );
+
+                const perfScore = calculatePerformanceScore(overallMetrics, confidence, accuracyScore, difficultyLevel);
 
                 const result: ScenarioResult = {
                     scenarioNumber: currentScenarioNumber,
@@ -145,7 +176,15 @@ export function useQuizState() {
                 setScreen('inter-scenario');
             } catch (error) {
                 console.error("Failed to evaluate scenario:", error);
-                // Fallback result if API fails
+                // Fallback result if API fails — use client-side heuristics, not flat 0.5s
+                const cognitiveFeatures = heuristicCognitiveFeatures(answers, questions);
+                const accuracyScore = 0.5;
+                const confidence = calculateDynamicConfidence(
+                    overallMetrics,
+                    difficultyLevel,
+                    accuracyScore,
+                    reflectionText
+                );
                 const result: ScenarioResult = {
                     scenarioNumber: currentScenarioNumber,
                     scenarioTitle: scenario?.title || `Round ${currentScenarioNumber}`,
@@ -158,11 +197,9 @@ export function useQuizState() {
                     timeVariance: overallMetrics.timeVariance,
                     confidence,
                     decisionStyle: overallMetrics.decisionStyle,
-                    performanceScore: calculatePerformanceScore(overallMetrics, confidence, 0.5),
-                    accuracyScore: 0.5,
-                    cognitive: {
-                        reflection_depth: 0.5, self_awareness: 0.5, learning_orientation: 0.5, creativity_score: 0.5, insights: ['Error evaluating scenario.']
-                    },
+                    performanceScore: calculatePerformanceScore(overallMetrics, confidence, accuracyScore, difficultyLevel),
+                    accuracyScore,
+                    cognitive: cognitiveFeatures,
                     avgTimeToStart: overallMetrics.avgTimeToStart,
                     totalResponseLength: overallMetrics.totalResponseLength,
                     skippedQuestions: overallMetrics.skippedQuestions,
@@ -231,6 +268,13 @@ export function useQuizState() {
         }
     }, [currentQuestionIndex]);
 
+    // Direct jump (Improvement #9) — used by the question navigation grid.
+    const goToQuestion = useCallback((index: number) => {
+        if (index >= 0 && index < totalQuestions) {
+            setCurrentQuestionIndex(index);
+        }
+    }, [totalQuestions]);
+
     // ── RESTART ───────────────────────────────────────────────────────────────
     const restartQuiz = useCallback(() => {
         setScreen('welcome');
@@ -261,6 +305,7 @@ export function useQuizState() {
         currentScenarioNumber,
         difficultyLevel,
         scenarioResults,
+        studentName,
         tokensUsed,
         totalCost,
 
@@ -271,7 +316,11 @@ export function useQuizState() {
         setAnswer,
         goToNextQuestion,
         goToPreviousQuestion,
+        goToQuestion,
         restartQuiz,
+        showStudentDashboard,
+        showTeacherDashboard,
+        goToWelcome,
         addCost,
     };
 }

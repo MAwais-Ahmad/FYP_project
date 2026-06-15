@@ -1,13 +1,15 @@
 import {
+    Answers,
     CategoryResult,
     CognitiveFeatures,
     DifficultySignal,
     LearnerCategoryId,
     OverallMetrics,
+    Question,
     ScenarioResult,
 } from '../types/quiz.types';
 
-// ─── CATEGORY METADATA (all 7 learner types) ─────────────────────────────────
+// ─── CATEGORY METADATA (all 8 learner types) ─────────────────────────────────
 
 export const LEARNER_CATEGORIES: Record<
     LearnerCategoryId,
@@ -241,6 +243,131 @@ export const LEARNER_CATEGORIES: Record<
     },
 };
 
+// ─── ANTI-GAMING + DYNAMIC CONFIDENCE (Improvement #3) ────────────────────────
+
+/**
+ * Detect "gaming"/avoidant behaviour: skipping questions, blank answers, or
+ * blasting through the whole round without reading. Shared by the classifier
+ * (forces `ignorant_avoider`) and the dynamic-confidence engine (forces 0).
+ */
+export function detectSkippingBehavior(
+    overall: OverallMetrics,
+    accuracyScore: number
+): boolean {
+    const rushedThrough =
+        accuracyScore < 0.25 &&
+        overall.avgResponseTime < 20 &&
+        overall.questionsAnswered < 4;
+    const tooManySkips = overall.skippedQuestions >= 3;
+    return rushedThrough || tooManySkips;
+}
+
+/**
+ * Implicit confidence score (0–10) derived from behaviour instead of a
+ * self-reported slider. Anti-gaming gatekeeper returns 0 for skippers.
+ */
+export function calculateDynamicConfidence(
+    overall: OverallMetrics,
+    chosenDifficulty: number,
+    accuracyScore: number,
+    reflectionText: string
+): number {
+    if (detectSkippingBehavior(overall, accuracyScore)) return 0;
+
+    let pts = 5; // base confidence
+
+    // 1. Time penalty / bonus
+    if (overall.overtimeCount > 0) {
+        pts -= overall.overtimeCount * 0.75; // overestimated / went overtime
+    } else if (overall.rushedDecisions === 0) {
+        pts += 1.5; // deliberate and finished in time
+    }
+
+    // 2. Difficulty multiplier — reward owning a harder round
+    if (chosenDifficulty >= 7) pts += 1.5;
+    else if (chosenDifficulty <= 3) pts -= 0.5;
+
+    // 3. Hesitation adjustments
+    if (overall.backtrackCount > 3) pts -= 1.0;
+    if (overall.totalAnswerChanges > 4) pts -= 0.8;
+
+    // 4. Decision quality — good choices justify more confidence (±1)
+    pts += (accuracyScore - 0.5) * 2;
+
+    // 5. Reflection engagement — a thoughtful reflection signals self-assurance
+    const words = reflectionText.trim().split(/\s+/).filter(Boolean).length;
+    if (words >= 25) pts += 1;
+    else if (words >= 8) pts += 0.5;
+    else if (words === 0) pts -= 1;
+
+    return Math.max(0, Math.min(10, Math.round(pts * 10) / 10));
+}
+
+// ─── CLIENT-SIDE COGNITIVE HEURISTICS (Improvement #4 fallback) ───────────────
+
+const CAUSAL_KEYWORDS = ['because', 'due to', 'so that', 'therefore', 'consequently', 'as a result', 'since', 'hence', 'in order to', 'this means'];
+const SELF_AWARE_KEYWORDS = ['i should have', 'my mistake', 'i assumed', 'i rushed', 'next time', "i'd change", 'i could have', 'i was wrong', 'i misjudged', 'i overlooked', 'i realise', 'i realize'];
+const LEARNING_KEYWORDS = ['learn', 'improve', 'better', 'practice', 'next time', 'grow', 'develop', 'work on'];
+
+function clamp01(n: number): number {
+    return Math.max(0, Math.min(1, n));
+}
+
+/** Flatten every student answer into a single lowercase text blob. */
+function collectAnswerText(answers: Answers, questions: Question[]): { all: string; reflection: string } {
+    let all = '';
+    let reflection = '';
+    questions.forEach(q => {
+        const a = answers[q.id];
+        let text = '';
+        if (Array.isArray(a)) text = a.join(' ');
+        else if (typeof a === 'string') text = a.includes('|') ? a.split('|').slice(1).join(' ') : a;
+        all += ' ' + text;
+        if (q.type === 'reflection') reflection += ' ' + text;
+    });
+    return { all: all.toLowerCase().trim(), reflection: reflection.toLowerCase().trim() };
+}
+
+function keywordHits(text: string, keywords: string[]): number {
+    return keywords.reduce((n, k) => (text.includes(k) ? n + 1 : n), 0);
+}
+
+/**
+ * Reliable, fully offline estimate of cognitive features from the raw answers.
+ * Used as a fallback when the LLM evaluation fails or is unavailable.
+ */
+export function heuristicCognitiveFeatures(
+    answers: Answers,
+    questions: Question[]
+): CognitiveFeatures {
+    const { all, reflection } = collectAnswerText(answers, questions);
+    const words = all.split(/\s+/).filter(Boolean).length;
+    const uniqueWords = new Set(all.split(/\s+/).filter(Boolean)).size;
+    const lexicalDiversity = words > 0 ? uniqueWords / words : 0;
+
+    // Reflection depth: length + causal reasoning
+    const lengthScore = clamp01(words / 120); // ~120 words => full marks
+    const causalScore = clamp01(keywordHits(all, CAUSAL_KEYWORDS) / 4);
+    const reflection_depth = clamp01(lengthScore * 0.6 + causalScore * 0.4);
+
+    // Self-awareness: self-critical phrasing in the reflection
+    const self_awareness = clamp01(keywordHits(reflection || all, SELF_AWARE_KEYWORDS) / 3);
+
+    // Learning orientation: desire to improve
+    const learning_orientation = clamp01(keywordHits(all, LEARNING_KEYWORDS) / 3 * 0.7 + (reflection ? 0.3 : 0));
+
+    // Creativity: lexical richness + answer volume as a rough proxy
+    const creativity_score = clamp01(lexicalDiversity * 0.6 + clamp01(words / 150) * 0.4);
+
+    return {
+        reflection_depth: Math.round(reflection_depth * 100) / 100,
+        self_awareness: Math.round(self_awareness * 100) / 100,
+        learning_orientation: Math.round(learning_orientation * 100) / 100,
+        creativity_score: Math.round(creativity_score * 100) / 100,
+        insights: ['Cognitive features estimated locally from your written answers (AI evaluation unavailable).'],
+    };
+}
+
 // ─── SCORING ENGINE ───────────────────────────────────────────────────────────
 
 interface ClassificationInput {
@@ -265,9 +392,8 @@ function scoreCategory(id: LearnerCategoryId, input: ClassificationInput): numbe
               scenarioResults[0].performanceScore
             : 0;
 
-    // ANTI-CHEAT GATEKEEPER
-    // If they skipped everything really fast or just let the timer run out on everything
-    const isSkippingBehavior = (accuracyScore < 0.25 && avgTime < 20 && overall.questionsAnswered < 4) || overall.skippedQuestions >= 3;
+    // ANTI-CHEAT GATEKEEPER (shared with the dynamic-confidence engine)
+    const isSkippingBehavior = detectSkippingBehavior(overall, accuracyScore);
     const skipped = overall.skippedQuestions;
     const overtime = overall.overtimeCount;
 
@@ -417,7 +543,7 @@ function scoreCategory(id: LearnerCategoryId, input: ClassificationInput): numbe
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
 /**
- * Classify a student into one (or a blend) of the 7 learner categories.
+ * Classify a student into one (or a blend) of the 8 learner categories.
  */
 export function classifyLearner(input: ClassificationInput): CategoryResult {
     const ids: LearnerCategoryId[] = [
@@ -466,11 +592,16 @@ export function classifyLearner(input: ClassificationInput): CategoryResult {
 /**
  * Calculate a normalized 0–1 performance score for a scenario.
  * Higher = better performance overall.
+ *
+ * Improvement #7: the score is now difficulty-calibrated — succeeding at a hard
+ * round (Level 7-10) is worth more than the same accuracy on an easy round, so
+ * the learning curve reflects real cognitive adaptation across rounds.
  */
 export function calculatePerformanceScore(
     overall: OverallMetrics,
     confidence: number,
-    accuracyScore: number
+    accuracyScore: number,
+    difficultyLevel: number = 5
 ): number {
     // Accuracy: 40%
     const accScore = accuracyScore * 0.4;
@@ -492,7 +623,14 @@ export function calculatePerformanceScore(
     const engagementScore =
         (changes >= 1 && changes <= 4 ? 0.9 : changes === 0 ? 0.45 : 0.25) * 0.1;
 
-    return Math.min(Math.max(accScore + confScore + speedScore + consistencyScore + engagementScore, 0), 1);
+    const base = accScore + confScore + speedScore + consistencyScore + engagementScore;
+
+    // Difficulty calibration: scale by how hard the round was. A perfect run on
+    // Level 10 can exceed a perfect run on Level 5; an easy round is slightly
+    // discounted. Multiplier ranges ~0.9 (Lvl 1) → ~1.18 (Lvl 10).
+    const difficultyMultiplier = 0.88 + (difficultyLevel / 10) * 0.3;
+
+    return Math.min(Math.max(base * difficultyMultiplier, 0), 1);
 }
 
 /**

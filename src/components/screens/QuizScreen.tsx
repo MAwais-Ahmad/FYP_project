@@ -19,6 +19,7 @@ interface QuizScreenProps {
     onAnswer: (questionId: number, answer: string | string[]) => void;
     onNext: () => void;
     onPrevious: () => void;
+    onJumpToQuestion: (index: number) => void;
     onCompleteScenario: () => void;
     onFirstInteraction: (questionId: number) => void;
     onAnswerChange: (questionId: number) => void;
@@ -36,6 +37,7 @@ export function QuizScreen({
     onAnswer,
     onNext,
     onPrevious,
+    onJumpToQuestion,
     onCompleteScenario,
     onFirstInteraction,
     onAnswerChange,
@@ -82,8 +84,6 @@ export function QuizScreen({
     // Local state for composite question types
     const [ranking, setRanking] = useState([1, 2, 3]);
     const [explanation, setExplanation] = useState('');
-    const [confidence, setConfidence] = useState(5);
-    const [improvement, setImprovement] = useState('');
     const [multiTextValues, setMultiTextValues] = useState(['', '', '']);
 
     // Restore or reset local state when question changes
@@ -101,16 +101,6 @@ export function QuizScreen({
                 setExplanation('');
             }
         }
-        if (question.type === 'reflection') {
-            if (typeof savedAnswer === 'string' && savedAnswer.includes('|')) {
-                const [confStr, imp] = savedAnswer.split('|');
-                setConfidence(parseInt(confStr) || 5);
-                setImprovement(imp || '');
-            } else {
-                setConfidence(5);
-                setImprovement('');
-            }
-        }
         if (question.type === 'multi-text') {
             if (Array.isArray(savedAnswer)) {
                 setMultiTextValues(savedAnswer);
@@ -125,11 +115,22 @@ export function QuizScreen({
         onPrevious();
     };
 
-    const formatTimeDisplay = (seconds: number): string => {
-        if (seconds === 0) return 'No time limit';
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return mins > 0 ? (secs > 0 ? `${mins}m ${secs}s` : `${mins} min`) : `${secs} sec`;
+    // Direct jump (Improvement #9). Record a backtrack only when moving to an
+    // EARLIER question, keeping behavioural metrics accurate.
+    const handleJump = (targetIndex: number) => {
+        if (targetIndex === currentQuestionIndex) return;
+        if (targetIndex < currentQuestionIndex) onBacktrack();
+        onJumpToQuestion(targetIndex);
+    };
+
+    // Has the student meaningfully answered a given question?
+    const isAnswered = (q: Question): boolean => {
+        const a = answers[q.id];
+        if (a == null) return false;
+        if (Array.isArray(a)) return a.some(s => (s || '').trim().length > 0);
+        const s = String(a);
+        if (q.type === 'ranking') return (s.split('|')[1] || '').trim().length > 0;
+        return s.trim().length > 0;
     };
 
     // Get solutions from the multi-text question (Q3) so ranking question can display them
@@ -202,16 +203,8 @@ export function QuizScreen({
                 return (
                     <ReflectionQuestion
                         question={question}
-                        confidence={confidence}
-                        improvement={improvement}
-                        onConfidenceChange={value => {
-                            setConfidence(value);
-                            onAnswer(question.id, `${value}|${improvement}`);
-                        }}
-                        onImprovementChange={text => {
-                            setImprovement(text);
-                            onAnswer(question.id, `${confidence}|${text}`);
-                        }}
+                        value={(answers[question.id] as string) || ''}
+                        onChange={text => onAnswer(question.id, text)}
                         onFirstInteraction={() => onFirstInteraction(question.id)}
                     />
                 );
@@ -251,16 +244,15 @@ export function QuizScreen({
     };
 
     return (
-        <section className="min-h-screen flex flex-col p-4 md:p-6">
-            {/* Header */}
-            <header className="flex flex-wrap items-center justify-between gap-4 mb-6">
-                <div className="flex items-center gap-3">
-                    {/* Scenario badge */}
-                    <div className="px-3 py-1 rounded-full text-xs font-medium bg-white/10 border border-white/20 text-white/70">
+        <section className="h-screen flex flex-col p-3 md:p-4 overflow-hidden">
+            {/* Header (compact) */}
+            <header className="flex flex-wrap items-center justify-between gap-2 mb-3 shrink-0">
+                <div className="flex items-center gap-2">
+                    <div className="px-2.5 py-1 rounded-full text-xs font-medium bg-white/10 border border-white/20 text-white/70">
                         Scenario {currentScenarioNumber}
                     </div>
-                    <div className="phase-badge">
-                        Phase {question.phase}: {question.phaseName}
+                    <div className="phase-badge !px-3 !py-1 !text-xs">
+                        P{question.phase}: {question.phaseName}
                     </div>
                 </div>
 
@@ -269,45 +261,36 @@ export function QuizScreen({
                     <div className="h-2 flex-1 rounded-full bg-white/20 overflow-hidden">
                         <div
                             className="h-full bg-gradient-to-r from-primary-500 to-accent-500 transition-all duration-300"
-                            style={{
-                                width: `${((currentQuestionIndex + 1) / questions.length) * 100}%`,
-                            }}
+                            style={{ width: `${((currentQuestionIndex + 1) / questions.length) * 100}%` }}
                         />
                     </div>
-                    <span className="text-sm text-white/70 whitespace-nowrap">
+                    <span className="text-xs text-white/70 whitespace-nowrap">
                         {currentQuestionIndex + 1}/{questions.length}
                     </span>
                 </div>
 
                 {/* Dual Timers */}
-                <div className="flex items-center gap-3">
-                    {/* Per-question timer */}
+                <div className="flex items-center gap-2">
                     {question.timeLimit > 0 ? (
-                        <div
-                            className={`timer-container ${getQuestionTimerClasses()}`}
-                            title="Time for this question"
-                        >
+                        <div className={`timer-container !px-3 !py-1 ${getQuestionTimerClasses()}`} title="Time for this question">
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <circle cx="12" cy="12" r="10" />
                                 <path d="M12 6v6l4 2" />
                             </svg>
-                            <span className="font-mono font-medium text-sm">
-                                {questionTimer.formattedTime}
-                            </span>
+                            <span className="font-mono font-medium text-sm">{questionTimer.formattedTime}</span>
                             {questionTimer.isOvertime && (
                                 <span className="text-[10px] uppercase font-bold text-orange-400 tracking-wider">OT</span>
                             )}
                         </div>
                     ) : (
-                        <div className="px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs">
+                        <div className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs">
                             ✨ No limit
                         </div>
                     )}
 
-                    {/* Overall scenario timer */}
                     {scenario.totalTimeLimit && scenario.totalTimeLimit > 0 && (
                         <div
-                            className={`px-3 py-1.5 rounded-full border text-xs font-mono font-medium flex items-center gap-1.5 ${getOverallTimerClasses()}`}
+                            className={`px-3 py-1 rounded-full border text-xs font-mono font-medium flex items-center gap-1.5 ${getOverallTimerClasses()}`}
                             title="Total time for this scenario"
                         >
                             <span className="text-[10px] uppercase font-bold tracking-wider opacity-60">Total</span>
@@ -317,54 +300,63 @@ export function QuizScreen({
                 </div>
             </header>
 
-            {/* Content */}
-            <div className="flex-1 grid gap-6 lg:grid-cols-3">
+            {/* Content — fills remaining height; each column scrolls internally */}
+            <div className="flex-1 min-h-0 grid gap-4 lg:grid-cols-3">
                 {/* Scenario sidebar */}
-                <div className="lg:col-span-1">
+                <div className="lg:col-span-1 min-h-0 overflow-y-auto pr-1">
                     <ScenarioCard scenario={scenario} />
                 </div>
 
                 {/* Question panel */}
-                <div className="lg:col-span-2 glass-card p-6">
-                    <div className="mb-4 flex items-center gap-3 text-sm text-white/60">
-                        <span>
-                            Phase {question.phase}: {question.phaseName}
-                        </span>
-                        <span className="px-3 py-1 rounded-full bg-white/10">
-                            {question.timeLimit > 0
-                                ? `⏱️ ${formatTimeDisplay(question.timeLimit)}`
-                                : '✨ Take your time'}
-                        </span>
-                    </div>
-
+                <div className="lg:col-span-2 min-h-0 glass-card p-4 md:p-5 overflow-y-auto">
                     {renderQuestion()}
                 </div>
             </div>
 
-            {/* Navigation */}
-            <div className="flex justify-between gap-4 mt-6">
-                <button
-                    onClick={handlePrevious}
-                    disabled={isFirstQuestion}
-                    className="btn-secondary"
-                >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            {/* Navigation bar — always visible above the fold */}
+            <div className="shrink-0 mt-3 flex items-center justify-between gap-3">
+                <button onClick={handlePrevious} disabled={isFirstQuestion} className="btn-secondary !py-2 !px-4 text-sm">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M19 12H5M12 19l-7-7 7-7" />
                     </svg>
-                    <span>Previous</span>
+                    <span className="hidden sm:inline">Previous</span>
                 </button>
 
+                {/* Question navigation grid (jump to any question) */}
+                <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                    {questions.map((q, idx) => {
+                        const active = idx === currentQuestionIndex;
+                        const answered = isAnswered(q);
+                        return (
+                            <button
+                                key={q.id}
+                                onClick={() => handleJump(idx)}
+                                title={`Q${idx + 1} · ${q.phaseName}${answered ? ' · answered' : ''}`}
+                                className={`w-8 h-8 rounded-full text-xs font-semibold border transition-all flex items-center justify-center
+                                    ${active
+                                        ? 'bg-gradient-to-br from-primary-500 to-accent-500 text-white border-white/40 ring-2 ring-primary-400/50 scale-110'
+                                        : answered
+                                            ? 'bg-emerald-500/30 text-emerald-200 border-emerald-400/40 hover:bg-emerald-500/40'
+                                            : 'bg-white/10 text-white/50 border-white/15 hover:bg-white/20'}`}
+                            >
+                                {idx + 1}
+                            </button>
+                        );
+                    })}
+                </div>
+
                 {isLastQuestion ? (
-                    <button onClick={onCompleteScenario} className="btn-success">
-                        <span>Submit Scenario {currentScenarioNumber}</span>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <button onClick={onCompleteScenario} className="btn-success !py-2 !px-4 text-sm">
+                        <span className="hidden sm:inline">Submit Scenario {currentScenarioNumber}</span>
+                        <span className="sm:hidden">Submit</span>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M20 6L9 17l-5-5" />
                         </svg>
                     </button>
                 ) : (
-                    <button onClick={onNext} className="btn-primary">
-                        <span>Next</span>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <button onClick={onNext} className="btn-primary !py-2 !px-4 text-sm">
+                        <span className="hidden sm:inline">Next</span>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M5 12h14M12 5l7 7-7 7" />
                         </svg>
                     </button>

@@ -1,15 +1,12 @@
-import { WelcomeScreen, QuizScreen, ResultsScreen, InterScenarioScreen } from './components';
+import {
+    WelcomeScreen,
+    QuizScreen,
+    ResultsScreen,
+    InterScenarioScreen,
+    StudentDashboard,
+    TeacherDashboard,
+} from './components';
 import { useQuizState, useMetrics } from './hooks';
-import { Question, Answers } from './types/quiz.types';
-
-function extractConfidence(answers: Answers, questions: Question[]): number {
-    const reflectionQ = questions.find(q => q.type === 'reflection');
-    if (!reflectionQ) return 5;
-    const raw = (answers[reflectionQ.id] as string) || '';
-    const [confStr] = raw.split('|');
-    const parsed = parseInt(confStr);
-    return Number.isNaN(parsed) ? 5 : Math.max(1, Math.min(10, parsed));
-}
 
 function App() {
     const {
@@ -21,6 +18,7 @@ function App() {
         answers,
         currentScenarioNumber,
         scenarioResults,
+        studentName,
         tokensUsed,
         totalCost,
         startQuiz,
@@ -30,7 +28,11 @@ function App() {
         setAnswer,
         goToNextQuestion,
         goToPreviousQuestion,
+        goToQuestion,
         restartQuiz,
+        showStudentDashboard,
+        showTeacherDashboard,
+        goToWelcome,
     } = useQuizState();
 
     const {
@@ -46,15 +48,14 @@ function App() {
         resetMetrics,
     } = useMetrics();
 
-    const handleStartQuiz = async (difficultyLevel: number) => {
+    const handleStartQuiz = async (difficultyLevel: number, name: string) => {
         startMetrics();
-        await startQuiz(difficultyLevel);
+        await startQuiz(difficultyLevel, name);
     };
 
     const handleCompleteScenario = () => {
         const overall = calculateOverallMetrics();
-        const confidence = extractConfidence(answers, questions);
-        completeScenario(overall, confidence);
+        completeScenario(overall);
     };
 
     const handleProceedToNextScenario = async (newDifficulty: number) => {
@@ -100,7 +101,12 @@ function App() {
     return (
         <div className="app-container min-h-screen">
             {screen === 'welcome' && (
-                <WelcomeScreen onStart={handleStartQuiz} isLoading={isLoading} />
+                <WelcomeScreen
+                    onStart={handleStartQuiz}
+                    onViewTeacherDashboard={showTeacherDashboard}
+                    onViewStudentDashboard={showStudentDashboard}
+                    isLoading={isLoading}
+                />
             )}
 
             {screen === 'quiz' && scenario && (
@@ -113,6 +119,7 @@ function App() {
                     onAnswer={handleAnswer}
                     onNext={goToNextQuestion}
                     onPrevious={goToPreviousQuestion}
+                    onJumpToQuestion={goToQuestion}
                     onCompleteScenario={handleCompleteScenario}
                     onFirstInteraction={recordFirstInteraction}
                     onAnswerChange={recordAnswerChange}
@@ -135,14 +142,27 @@ function App() {
             {screen === 'results' && scenario && (
                 <ResultsScreen
                     questions={questions}
-                    answers={answers}
                     calculateMetrics={calculateOverallMetrics}
                     questionsMetrics={questionsMetrics}
                     scenarioResults={scenarioResults}
+                    studentName={studentName}
                     tokensUsed={tokensUsed}
                     totalCost={totalCost}
                     onRestart={handleRestart}
+                    onViewDashboard={showStudentDashboard}
                 />
+            )}
+
+            {screen === 'student-dashboard' && (
+                <StudentDashboard
+                    studentName={studentName}
+                    onBack={goToWelcome}
+                    onStartNew={handleRestart}
+                />
+            )}
+
+            {screen === 'teacher-dashboard' && (
+                <TeacherDashboard onBack={goToWelcome} />
             )}
         </div>
     );

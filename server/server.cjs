@@ -15,7 +15,7 @@ app.use(express.static('.'));
 
 let totalTokensUsed = 0;
 
-// ─── SCENARIO FORMATS (not just budget allocation!) ──────────────────────────
+// ─── SCENARIO FORMATS (11 formats — far beyond just budget allocation!) ───────
 const scenarioFormats = [
   {
     format: 'budget_allocation',
@@ -41,6 +41,113 @@ const scenarioFormats = [
     format: 'time_management',
     prompt: 'An overwhelming week where too many commitments overlap — exams, family event, friend needs help, personal project deadline, health issue. Student must prioritize and some things WILL be dropped. Focus on what they sacrifice and why.',
   },
+  // ─── NEW FORMATS (Improvement #1) ───────────────────────────────────────────
+  {
+    format: 'resource_constraint',
+    prompt: 'Managing scarce equipment/facilities rather than money — e.g., one functional lab PC for a whole group, a single projector double-booked between two societies, limited hostel study rooms during exams. Student must allocate physical/time resources and justify trade-offs.',
+  },
+  {
+    format: 'peer_review_feedback',
+    prompt: 'Handling critical academic evaluation — e.g., a supervisor tears apart their FYP proposal, a peer review round where their code/design is harshly criticised, or they must deliver tough feedback to a friend. Focus on how they receive, process, and respond to criticism.',
+  },
+  {
+    format: 'uncertainty_incomplete_data',
+    prompt: 'Decision-making when half the information is missing — e.g., choosing a final-year specialisation with no clear job data, committing to an event vendor whose reviews are unavailable, picking a teammate whose skills are unverified. Student must reason under genuine uncertainty and state assumptions.',
+  },
+  {
+    format: 'innovation_ideation',
+    prompt: 'Proposing a high-risk / high-reward solution — e.g., pitching an untested startup idea at a campus competition, redesigning a broken society process from scratch, choosing an ambitious vs safe FYP topic. Reward originality but force them to confront real failure risk.',
+  },
+  {
+    format: 'cross_cultural_communication',
+    prompt: 'Managing international or cross-cultural team dynamics — e.g., coordinating a remote hackathon team across time zones and languages, mediating a misunderstanding between local and foreign exchange students, working with an overseas freelancing client with different norms. Focus on empathy, clarity, and adaptation.',
+  },
+];
+
+// ─── 7 COGNITIVE PHASES (Improvement #8 — anti-predictability) ────────────────
+// Each session is exactly 7 questions, one per cognitive phase, but their DISPLAY
+// ORDER is shuffled every time (phases 1-6 shuffled; Reflection always closes).
+const COGNITIVE_PHASES = [
+  { phase: 1, phaseName: 'Understanding',        type: 'text',       desc: 'Identify the CORE tension / underlying problem in this specific story.', timeRange: '60-120s' },
+  { phase: 2, phaseName: 'Information Filtering', type: 'mcq',        desc: 'Decide which piece of data/file/resource/person to trust MOST before acting.', timeRange: '30-60s' },
+  { phase: 3, phaseName: 'Planning',             type: 'multi-text', desc: 'Propose THREE distinct strategies/approaches for THIS situation.', timeRange: '90-180s' },
+  { phase: 4, phaseName: 'Risk Mitigation',      type: 'mcq',        desc: 'Identify the biggest failure point or the smartest Plan B for this story.', timeRange: '40-70s' },
+  { phase: 5, phaseName: 'Execution Twist',      type: 'mcq-urgent', desc: 'React under pressure to a SUDDEN change/crisis unique to this story.', timeRange: '30-45s' },
+  { phase: 6, phaseName: 'Collaboration',        type: 'text',       desc: 'Persuade, delegate, or manage a specific person/relationship in the story.', timeRange: '60-120s' },
+  { phase: 7, phaseName: 'Reflection',           type: 'reflection', desc: 'Hindsight, calibration and honest self-grading.', timeRange: '0 (unlimited)' },
+];
+
+// Fisher–Yates shuffle
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Build a shuffled phase ORDER: phases 1-6 randomised, Reflection (7) always last.
+function buildShuffledPhaseOrder() {
+  const firstSix = COGNITIVE_PHASES.filter(p => p.phase !== 7);
+  const reflection = COGNITIVE_PHASES.find(p => p.phase === 7);
+  return [...shuffle(firstSix), reflection];
+}
+
+// ─── 50+ LOCALISED PAKISTANI SCENARIO SEEDS (Improvement #8) ──────────────────
+const SCENARIO_SEEDS = [
+  'University spring fest budget split between competing societies',
+  'A freelancing Fiverr client demands a refund after the deadline passed',
+  'Hostel warden dispute over a late-night noise complaint',
+  'Group FYP teammate vanishes two weeks before the final demo',
+  'Choosing between a paid internship and a family wedding in another city',
+  'Society treasurer caught between the president and the faculty advisor',
+  'Loadshedding wipes out work the night before a submission',
+  'A junior on your team is being bullied in the WhatsApp group',
+  'Splitting a shared flat rent when one roommate loses their stipend',
+  'Cricket tournament clashes with a make-up exam on the same day',
+  'A classmate offers to sell you last year’s paper before the midterm',
+  'Daewoo bus breaks down on the way to a scholarship interview',
+  'Two close friends in a fight both ask you to pick a side',
+  'Managing a campaign for the student council elections on a tiny budget',
+  'A professor mistakenly gives you extra marks you did not earn',
+  'Your startup idea is praised but a senior says it will never work',
+  'Coordinating a remote hackathon team across Karachi, Lahore and Dubai',
+  'Family pressures you to switch from CS to medicine in your final year',
+  'A donor pledges fest sponsorship but wants their brand everywhere',
+  'Limited lab PCs and three groups need them for the same deadline',
+  'Your code broke production during a live society app demo',
+  'A teammate uses AI to write a report you all must defend',
+  'Choosing a final-year specialisation with no clear job-market data',
+  'A vendor for the convocation dinner cancels 24 hours before',
+  'Mediating between a local student and a foreign exchange student',
+  'You must deliver harsh peer-review feedback to a sensitive friend',
+  'Eid plans collide with a mandatory FYP supervisor meeting',
+  'A society event permit gets revoked the morning of the event',
+  'Your scholarship requires a GPA you might miss by 0.1',
+  'A senior asks you to inflate attendance for a society event report',
+  'Picking a teammate whose claimed skills are completely unverified',
+  'A viral tweet about your society starts a small controversy',
+  'The MUN delegation budget cannot cover all selected delegates',
+  'A group member wants credit for work they did not do',
+  'Your part-time tuition job clashes with lab timings',
+  'A campus startup competition: pitch a safe idea or an ambitious one',
+  'A friend asks to copy your assignment the night before it is due',
+  'Organising iftar for a hostel when the mess budget is cut',
+  'A guest speaker cancels an hour before a packed seminar hall',
+  'Deciding how to spend a surprise Rs.100,000 society grant',
+  'A teammate’s laptop with all the shared work gets stolen',
+  'Choosing between two internship offers with very different cultures',
+  'A WhatsApp rumour threatens to derail your event registrations',
+  'You overcommitted to three societies and all need you this week',
+  'A foreign client expects replies during your sleeping hours',
+  'A juniors’ orientation goes over budget on day one',
+  'Your research data looks promising but the sample is too small',
+  'A society co-lead keeps overruling you in front of the team',
+  'Allocating one projector double-booked by two societies',
+  'A classmate threatens to report a harmless prank to the DSA',
+  'Balancing a sick parent at home with finals week on campus',
+  'A sponsor’s payment is delayed but vendors demand advance money',
 ];
 
 // ─── DIFFICULTY LEVEL DESCRIPTIONS ───────────────────────────────────────────
@@ -99,8 +206,17 @@ app.post('/api/generate-scenario', async (req, res) => {
     const difficultyPrompt = getDifficultyPrompt(difficultyLevel);
     const adaptiveContext = getAdaptiveContext(difficultySignal, scenarioNumber);
 
-    const diversityPrompt = previousThemes.length > 0 
-      ? `\nCRITICAL DIVERSITY RULE: Do NOT use any of these previous themes or contexts: [${previousThemes.join(', ')}]. Pick a completely different industry, setting, or context to keep the user engaged.` 
+    // Anti-predictability: pick a random localised seed + shuffle the 7 cognitive phases
+    const randomSeed = SCENARIO_SEEDS[Math.floor(Math.random() * SCENARIO_SEEDS.length)];
+    const phaseOrder = buildShuffledPhaseOrder();
+
+    // Describe the exact 7 questions (in their shuffled display order) for the LLM.
+    const phaseSpec = phaseOrder
+      .map((p, idx) => `  ${idx + 1}. id=${idx + 1} | phase=${p.phase} | phaseName="${p.phaseName}" | type=${p.type} | timeLimit≈${p.timeRange} | TASK: ${p.desc}`)
+      .join('\n');
+
+    const diversityPrompt = previousThemes.length > 0
+      ? `\nCRITICAL DIVERSITY RULE: Do NOT use any of these previous themes or contexts: [${previousThemes.join(', ')}]. Pick a completely different industry, setting, or context to keep the user engaged.`
       : '';
 
     const completion = await openai.chat.completions.create({
@@ -120,6 +236,7 @@ Return ONLY valid JSON — no markdown, no backticks, no extra text.`,
 
 FORMAT: ${randomFormat.format}
 DESCRIPTION: ${randomFormat.prompt}
+STORY SEED (use as loose inspiration, reinvent the specifics with fresh names/numbers): "${randomSeed}"
 
 ${difficultyPrompt}
 ${adaptiveContext}
@@ -128,22 +245,29 @@ ${diversityPrompt}
 TARGET AUDIENCE: Pakistani university students aged 18-25. Use relatable contexts — hostel life, group projects, family pressure, career decisions, social media, freelancing, campus politics, relationships, financial stress.
 
 IMPORTANT RULES:
-1. Create a SPECIFIC, vivid story with names, details, and emotional stakes
-2. ALL questions must reference THIS specific story — no generic questions
-3. Mix question types creatively across the 4 phases
-4. The scenario should test decision-making ability, NOT academic knowledge
-5. Make it feel REAL, not like a textbook exercise
-6. Use Pakistani Rupees (Rs.) for any money amounts
-7. Include cultural nuances where relevant (family expectations, social pressure, izzat/reputation)
-8. Set timeLimit (in seconds) DYNAMICALLY based on each question's complexity:
-   - Simple MCQs: 30-60s
-   - Text analysis / short answer: 60-120s  
-   - Multi-text planning (3 approaches): 90-180s
-   - Urgent twist decisions: 30-45s
-   - Reflection: 0 (unlimited)
-9. Set totalTimeLimit for the entire scenario = sum of all question timeLimits + 30% buffer, rounded to nearest 30s
+1. Create a SPECIFIC, vivid story with names, details, and emotional stakes.
+2. ALL questions must reference THIS specific story — no generic questions.
+3. The scenario should test decision-making ability, NOT academic knowledge.
+4. Make it feel REAL, not like a textbook exercise.
+5. Use Pakistani Rupees (Rs.) for any money amounts.
+6. Include cultural nuances where relevant (family expectations, social pressure, izzat/reputation).
+7. SHUFFLE STRUCTURAL DETAILS: invent fresh stakeholder names, resource values, deadlines and numbers every time — never reuse a template.
+8. Set each "timeLimit" (in seconds) DYNAMICALLY within the suggested range based on that question's real complexity.
+9. Set "totalTimeLimit" = sum of all 7 question timeLimits + 30% buffer, rounded to nearest 30s.
 
-Return this JSON structure:
+CRITICAL — QUESTION STRUCTURE (anti-predictability):
+You MUST output EXACTLY 7 questions, in the EXACT order, ids, phases, phaseNames and types listed below.
+This order is RANDOMISED for this session — honour it precisely so the experience is never repetitive:
+${phaseSpec}
+
+Type-specific requirements:
+- type "text": include a helpful "hint". May include "context" describing an aftermath/situation.
+- type "mcq": include exactly 4 plausible, scenario-specific "options" (no obvious throwaway answers).
+- type "multi-text": ask for 3 distinct approaches; include a "hint". (The UI shows 3 input boxes.)
+- type "mcq-urgent": include a vivid "urgentUpdate" (a sudden twist UNIQUE to this story, prefixed with 🚨) AND exactly 4 "options". Keep it tight and high-pressure. The twist must be freshly generated, never a stock template.
+- type "reflection": timeLimit MUST be 0. Ask ONLY: "Looking back, what would you do differently and why?" (Do NOT ask the student to self-rate a confidence number — confidence is measured automatically.)
+
+Return ONLY this JSON structure (questions array must follow the shuffled order above):
 {
   "scenario": {
     "title": "[emoji] [Creative 4-6 word title]",
@@ -151,72 +275,10 @@ Return this JSON structure:
     "context_details": "[Key facts: names, numbers, deadlines — bullet-point style]",
     "constraint": "[The core tension or impossible choice in one sentence]",
     "urgency": "[Why this can't wait — specific deadline or consequence]",
-    "totalTimeLimit": "[Total seconds for the entire scenario — sum of all question times + 30% buffer, rounded to nearest 30]"
+    "totalTimeLimit": [number of seconds]
   },
   "questions": [
-    {
-      "id": 1,
-      "phase": 1,
-      "phaseName": "Understanding",
-      "type": "text",
-      "timeLimit": "[DYNAMIC: 60-120s based on complexity]",
-      "question": "[Reference SPECIFIC scenario details. Ask them to identify the core problem.]",
-      "hint": "[Helpful nudge using actual names/details from the scenario]"
-    },
-    {
-      "id": 2,
-      "phase": 1,
-      "phaseName": "Understanding",
-      "type": "mcq",
-      "timeLimit": "[DYNAMIC: 30-60s based on complexity]",
-      "question": "[Scenario-specific MCQ about what matters most here]",
-      "options": ["[Option referencing scenario detail A]", "[Option B]", "[Option C]", "[Option D]"]
-    },
-    {
-      "id": 3,
-      "phase": 2,
-      "phaseName": "Planning",
-      "type": "multi-text",
-      "timeLimit": "[DYNAMIC: 90-180s based on complexity]",
-      "question": "[Ask for 3 different approaches to handle THIS specific situation]",
-      "hint": "[Creative hint relevant to this scenario]"
-    },
-    {
-      "id": 4,
-      "phase": 2,
-      "phaseName": "Planning",
-      "type": "ranking",
-      "timeLimit": "[DYNAMIC: 60-90s based on complexity]",
-      "question": "[Rank their 3 approaches — reference scenario stakes]",
-      "hint": "[What should they optimize for in this context?]"
-    },
-    {
-      "id": 5,
-      "phase": 3,
-      "phaseName": "Execution",
-      "type": "mcq-urgent",
-      "timeLimit": "[DYNAMIC: 30-45s — keep it tight for urgency]",
-      "urgentUpdate": "🚨 [A sudden twist UNIQUE to this story — new info, deadline change, someone's reaction]",
-      "question": "[Quick decision about this twist]",
-      "options": ["[Immediate action]", "[Cautious approach]", "[Stick to plan]", "[Creative alternative]"]
-    },
-    {
-      "id": 6,
-      "phase": 3,
-      "phaseName": "Execution",
-      "type": "text",
-      "timeLimit": "[DYNAMIC: 60-120s based on complexity]",
-      "context": "[Describe the aftermath — who's upset, what went wrong/right]",
-      "question": "[How would you handle this specific person's reaction?]"
-    },
-    {
-      "id": 7,
-      "phase": 4,
-      "phaseName": "Reflection",
-      "type": "reflection",
-      "timeLimit": 0,
-      "question": "Looking back at everything in this scenario: (1) Rate your confidence 1-10. (2) What would you do differently?"
-    }
+    { "id": <n>, "phase": <cognitivePhaseNumber>, "phaseName": "<exact name>", "type": "<exact type>", "timeLimit": <seconds>, "question": "...", "hint": "...(text/multi-text)", "context": "...(optional, text only)", "options": ["...","...","...","..."], "urgentUpdate": "🚨 ...(mcq-urgent only)" }
   ]
 }`,
         },
@@ -233,11 +295,34 @@ Return this JSON structure:
       data.scenario.totalTimeLimit = parseInt(data.scenario.totalTimeLimit) || 600;
     }
 
+    // ── Normalise questions to the shuffled 7-phase contract ──────────────────
+    // Defends against LLM drift so the frontend always renders valid types/order.
+    const allowedTypes = new Set(['text', 'mcq', 'mcq-urgent', 'multi-text', 'ranking', 'reflection']);
+    if (Array.isArray(data.questions)) {
+      data.questions = data.questions.slice(0, 7).map((q, i) => {
+        const spec = phaseOrder[i] || phaseOrder[phaseOrder.length - 1];
+        const type = allowedTypes.has(q.type) ? q.type : spec.type;
+        const tl = typeof q.timeLimit === 'string' ? parseInt(q.timeLimit) : q.timeLimit;
+        return {
+          ...q,
+          id: i + 1,
+          phase: q.phase || spec.phase,
+          phaseName: q.phaseName || spec.phaseName,
+          type,
+          timeLimit: type === 'reflection' ? 0 : (Number.isFinite(tl) && tl > 0 ? tl : 60),
+        };
+      });
+    }
+    if (data.scenario && (!data.scenario.totalTimeLimit || data.scenario.totalTimeLimit < 60)) {
+      const sum = (data.questions || []).reduce((s, q) => s + (q.timeLimit || 0), 0);
+      data.scenario.totalTimeLimit = Math.max(300, Math.round((sum * 1.3) / 30) * 30);
+    }
+
     totalTokensUsed += completion.usage.total_tokens;
     const estimatedCost = (completion.usage.prompt_tokens * 0.00000015) + (completion.usage.completion_tokens * 0.0000006);
 
     console.log(
-      `✅ S${scenarioNumber} | ${randomFormat.format} | Lvl ${difficultyLevel} | ${difficultySignal || 'standard'} | ${completion.usage.total_tokens} tokens | ~$${estimatedCost.toFixed(4)}`
+      `✅ S${scenarioNumber} | ${randomFormat.format} | seed:"${randomSeed.slice(0, 30)}…" | order:[${phaseOrder.map(p => p.phase).join('')}] | Lvl ${difficultyLevel} | ${difficultySignal || 'standard'} | ${completion.usage.total_tokens} tokens | ~$${estimatedCost.toFixed(4)}`
     );
 
     res.json({
@@ -304,15 +389,22 @@ app.post('/api/evaluate-scenario', async (req, res) => {
           content: `You are an expert behavioral assessor. You evaluate a student's performance on a decision-making scenario.
 You will receive the scenario context, the questions asked, and the student's answers.
 
-1. "accuracy_score" (0.0 to 1.0): Evaluate how pragmatic, logical, and effective their decisions were given the scenario constraints (e.g., budget, time, relationships). Did they make good choices?
-2. "cognitive_features" (0.0 to 1.0 each):
-   - reflection_depth: Did they think deeply and justify their reasoning?
-   - self_awareness: Did they recognize their own biases, mistakes, or limitations in the final reflection?
-   - learning_orientation: Do they show a desire to improve or learn from the outcome?
-   - creativity_score: Did they propose novel, out-of-the-box solutions?
-3. "insights": Provide 2-3 brief observations about their decision-making style.
+Score every field on a continuous 0.0–1.0 scale. DO NOT default to 0.5 — read the answers and discriminate. Use the full range.
 
-Handle gibberish or nonsensical answers by assigning very low scores (0.1).
+1. "accuracy_score": How pragmatic, logical and effective were their decisions given the scenario constraints (budget, time, relationships)?
+   - 0.8-1.0: choices directly resolve the core tension and respect constraints.
+   - 0.4-0.7: reasonable but partial or with notable trade-off blind spots.
+   - 0.0-0.3: ignores constraints, contradictory, or off-topic.
+
+2. "cognitive_features" — apply these EXPLICIT RUBRICS:
+   - reflection_depth: reward word count + causal reasoning. Look for connectives like "because", "due to", "so that", "therefore", "consequently", and weighing of multiple factors. One-line/superficial answers → ≤0.3; multi-factor justified reasoning → ≥0.7.
+   - self_awareness: reward self-critical phrases and recognition of one's own mistakes/biases/limits in the reflection ("I should have", "my mistake", "I assumed", "I rushed", "next time I'd"). None → ≤0.2; explicit, specific self-critique → ≥0.75.
+   - learning_orientation: reward a concrete desire to improve and a stated plan for doing better next time. Vague "I'd do better" → ~0.4; specific, actionable improvement → ≥0.75.
+   - creativity_score: compare against the obvious/standard response. Reward novel, out-of-the-box, resourceful approaches. Generic textbook answer → ≤0.35; genuinely original idea → ≥0.75.
+
+3. "insights": 2-3 brief, specific observations about their decision-making style (reference what they actually wrote).
+
+Gibberish, empty, or nonsensical answers → assign very low scores (≤0.1) and say so in insights.
 Return ONLY valid JSON.`
         },
         {
@@ -374,7 +466,19 @@ app.get('/api/health', (req, res) => {
     model: MODEL,
     totalTokensUsed,
     scenarioFormats: scenarioFormats.map(f => f.format),
-    features: ['gpt-4o-mini', '6-scenario-formats', 'difficulty-1-10', 'adaptive', 'age-18-25'],
+    cognitivePhases: COGNITIVE_PHASES.map(p => p.phaseName),
+    scenarioSeeds: SCENARIO_SEEDS.length,
+    features: [
+      'gpt-4o-mini',
+      `${scenarioFormats.length}-scenario-formats`,
+      '7-cognitive-phases',
+      'shuffled-question-order',
+      `${SCENARIO_SEEDS.length}-localised-seeds`,
+      'rubric-based-evaluation',
+      'difficulty-1-10',
+      'adaptive',
+      'age-18-25',
+    ],
   });
 });
 
@@ -382,5 +486,6 @@ app.listen(PORT, () => {
   console.log(`🚀 AITA Server on http://localhost:${PORT}`);
   console.log(`🤖 Model: ${MODEL}`);
   console.log(`🎲 ${scenarioFormats.length} scenario formats: ${scenarioFormats.map(f => f.format).join(', ')}`);
+  console.log(`🧩 7 cognitive phases (shuffled per session) | 📚 ${SCENARIO_SEEDS.length} localised seeds`);
   console.log(`🔑 API key: ${process.env.OPENAI_API_KEY ? '✅' : '❌ MISSING'}`);
 });

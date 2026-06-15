@@ -85,7 +85,13 @@ export interface Answers {
 
 // ─── MULTI-SCENARIO + ML CLASSIFICATION TYPES ────────────────────────────────
 
-export type ScreenType = 'welcome' | 'quiz' | 'inter-scenario' | 'results';
+export type ScreenType =
+    | 'welcome'
+    | 'quiz'
+    | 'inter-scenario'
+    | 'results'
+    | 'student-dashboard'
+    | 'teacher-dashboard';
 
 export type DifficultySignal = 'harder' | 'easier' | 'consistency_test';
 
