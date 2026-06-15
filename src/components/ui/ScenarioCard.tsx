@@ -7,23 +7,23 @@ interface ScenarioCardProps {
 export function ScenarioCard({ scenario }: ScenarioCardProps) {
     return (
         <div className="glass-card p-6 space-y-4">
-            <div className="flex items-center gap-3">
-                <h2 className="text-xl font-semibold">{scenario.title}</h2>
-            </div>
+            <h2 className="text-xl font-semibold">{scenario.title}</h2>
 
             <div className="space-y-3 text-white/80">
                 <p>{scenario.description}</p>
 
+                {/* Budget format */}
                 {scenario.budget && (
                     <p>
                         <strong className="text-white">Budget:</strong> {scenario.budget}
                     </p>
                 )}
 
+                {/* Stakeholders (budget format) */}
                 {scenario.stakeholders && scenario.stakeholders.length > 0 && (
                     <div>
                         <p className="font-medium text-white mb-2">
-                            {scenario.stakeholders.length} stakeholders want funding:
+                            {scenario.stakeholders.length} stakeholders:
                         </p>
                         <ul className="space-y-2">
                             {scenario.stakeholders.map((s, idx) => (
@@ -34,6 +34,13 @@ export function ScenarioCard({ scenario }: ScenarioCardProps) {
                                 </li>
                             ))}
                         </ul>
+                    </div>
+                )}
+
+                {/* Context details (non-budget formats) */}
+                {scenario.context_details && (
+                    <div className="p-3 rounded-lg bg-white/5 border border-white/10 text-sm text-white/70 whitespace-pre-line">
+                        {scenario.context_details}
                     </div>
                 )}
 

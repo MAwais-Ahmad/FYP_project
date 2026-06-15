@@ -1,4 +1,4 @@
-import { Scenario, Question, CognitiveFeatures } from '../types/quiz.types';
+import { CognitiveFeatures, DifficultySignal, Question, Scenario } from '../types/quiz.types';
 
 const API_BASE = '/api';
 
@@ -13,19 +13,16 @@ interface GenerateScenarioResponse {
     message?: string;
 }
 
-interface AnalyzeReflectionResponse {
-    success: boolean;
-    analysis: CognitiveFeatures;
-    usage: {
-        tokens: number;
-        estimatedCost: number;
-    };
-}
-
-export async function generateScenario(): Promise<GenerateScenarioResponse> {
+export async function generateScenario(
+    difficultySignal?: DifficultySignal,
+    scenarioNumber: number = 1,
+    difficultyLevel: number = 5,
+    previousThemes: string[] = []
+): Promise<GenerateScenarioResponse> {
     const response = await fetch(`${API_BASE}/generate-scenario`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ difficultySignal, scenarioNumber, difficultyLevel, previousThemes }),
     });
 
     if (!response.ok) {
@@ -35,19 +32,27 @@ export async function generateScenario(): Promise<GenerateScenarioResponse> {
     return response.json();
 }
 
-export async function analyzeReflection(
-    reflectionText: string,
-    confidenceRating: number,
-    scenario: string
-): Promise<AnalyzeReflectionResponse> {
-    const response = await fetch(`${API_BASE}/analyze-reflection`, {
+interface EvaluateScenarioResponse {
+    success: boolean;
+    evaluation: {
+        accuracy_score: number;
+        cognitive_features: CognitiveFeatures;
+    };
+    usage: {
+        tokens: number;
+        estimatedCost: number;
+    };
+}
+
+export async function evaluateScenario(
+    scenario: any,
+    questions: any[],
+    answers: any
+): Promise<EvaluateScenarioResponse> {
+    const response = await fetch(`${API_BASE}/evaluate-scenario`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            reflectionText,
-            confidenceRating,
-            scenario
-        })
+        body: JSON.stringify({ scenario, questions, answers }),
     });
 
     if (!response.ok) {

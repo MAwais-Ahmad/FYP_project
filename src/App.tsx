@@ -1,5 +1,15 @@
-import { WelcomeScreen, QuizScreen, ResultsScreen } from './components';
+import { WelcomeScreen, QuizScreen, ResultsScreen, InterScenarioScreen } from './components';
 import { useQuizState, useMetrics } from './hooks';
+import { Question, Answers } from './types/quiz.types';
+
+function extractConfidence(answers: Answers, questions: Question[]): number {
+    const reflectionQ = questions.find(q => q.type === 'reflection');
+    if (!reflectionQ) return 5;
+    const raw = (answers[reflectionQ.id] as string) || '';
+    const [confStr] = raw.split('|');
+    const parsed = parseInt(confStr);
+    return Number.isNaN(parsed) ? 5 : Math.max(1, Math.min(10, parsed));
+}
 
 function App() {
     const {
@@ -9,15 +19,18 @@ function App() {
         questions,
         currentQuestionIndex,
         answers,
+        currentScenarioNumber,
+        scenarioResults,
         tokensUsed,
         totalCost,
         startQuiz,
+        completeScenario,
+        proceedToNextScenario,
+        finishAssessment,
         setAnswer,
         goToNextQuestion,
         goToPreviousQuestion,
-        submitQuiz,
         restartQuiz,
-        addCost,
     } = useQuizState();
 
     const {
@@ -27,14 +40,27 @@ function App() {
         recordFirstInteraction,
         recordAnswerChange,
         recordQuestionEnd,
+        recordFinalAnswer,
         recordBacktrack,
         calculateOverallMetrics,
         resetMetrics,
     } = useMetrics();
 
-    const handleStartQuiz = async () => {
+    const handleStartQuiz = async (difficultyLevel: number) => {
         startMetrics();
-        await startQuiz();
+        await startQuiz(difficultyLevel);
+    };
+
+    const handleCompleteScenario = () => {
+        const overall = calculateOverallMetrics();
+        const confidence = extractConfidence(answers, questions);
+        completeScenario(overall, confidence);
+    };
+
+    const handleProceedToNextScenario = async (newDifficulty: number) => {
+        resetMetrics();
+        startMetrics();
+        await proceedToNextScenario(newDifficulty);
     };
 
     const handleRestart = () => {
@@ -42,7 +68,23 @@ function App() {
         restartQuiz();
     };
 
-    // Extract question metrics for results screen
+    const handleAnswer = (questionId: number, answer: string | string[]) => {
+        setAnswer(questionId, answer);
+        
+        let textVal = '';
+        if (Array.isArray(answer)) {
+            textVal = answer.join('');
+        } else if (typeof answer === 'string') {
+            if (answer.includes('|')) {
+                textVal = answer.split('|')[1] || '';
+            } else {
+                textVal = answer;
+            }
+        }
+        
+        recordFinalAnswer(questionId, answer, textVal.length);
+    };
+
     const questionsMetrics = Object.fromEntries(
         Object.entries(metrics.questions).map(([id, m]) => [
             id,
@@ -51,17 +93,14 @@ function App() {
                 timeToFirstInteraction: m.timeToFirstInteraction,
                 answerChanges: m.answerChanges,
                 responseLength: m.responseLength,
-            }
+            },
         ])
     );
 
     return (
         <div className="app-container min-h-screen">
             {screen === 'welcome' && (
-                <WelcomeScreen
-                    onStart={handleStartQuiz}
-                    isLoading={isLoading}
-                />
+                <WelcomeScreen onStart={handleStartQuiz} isLoading={isLoading} />
             )}
 
             {screen === 'quiz' && scenario && (
@@ -70,10 +109,11 @@ function App() {
                     questions={questions}
                     currentQuestionIndex={currentQuestionIndex}
                     answers={answers}
-                    onAnswer={setAnswer}
+                    currentScenarioNumber={currentScenarioNumber}
+                    onAnswer={handleAnswer}
                     onNext={goToNextQuestion}
                     onPrevious={goToPreviousQuestion}
-                    onSubmit={submitQuiz}
+                    onCompleteScenario={handleCompleteScenario}
                     onFirstInteraction={recordFirstInteraction}
                     onAnswerChange={recordAnswerChange}
                     onQuestionStart={recordQuestionStart}
@@ -82,16 +122,25 @@ function App() {
                 />
             )}
 
+            {screen === 'inter-scenario' && (
+                <InterScenarioScreen
+                    completedScenarioNumber={currentScenarioNumber}
+                    scenarioResult={scenarioResults[scenarioResults.length - 1] ?? null}
+                    isLoading={isLoading}
+                    onContinue={handleProceedToNextScenario}
+                    onFinish={finishAssessment}
+                />
+            )}
+
             {screen === 'results' && scenario && (
                 <ResultsScreen
-                    scenario={scenario}
                     questions={questions}
                     answers={answers}
                     calculateMetrics={calculateOverallMetrics}
                     questionsMetrics={questionsMetrics}
+                    scenarioResults={scenarioResults}
                     tokensUsed={tokensUsed}
                     totalCost={totalCost}
-                    onAddCost={addCost}
                     onRestart={handleRestart}
                 />
             )}

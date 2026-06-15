@@ -11,6 +11,7 @@ const createEmptyQuestionMetrics = (): QuestionMetrics => ({
     responseLength: 0,
     timeLimit: 0,
     usedTime: 0,
+    overtimeSeconds: 0,
     phase: null,
 });
 
@@ -100,15 +101,19 @@ export function useMetrics() {
             const q = prev.questions[questionId];
             if (!q || !q.questionShownAt) return prev;
 
-            const totalTimeSpent = (Date.now() - q.questionShownAt) / 1000;
+            const sessionTime = (Date.now() - q.questionShownAt) / 1000;
+            const newTotalTimeSpent = q.totalTimeSpent + sessionTime;
+            const overtime = q.timeLimit > 0 ? Math.max(0, newTotalTimeSpent - q.timeLimit) : 0;
             return {
                 ...prev,
                 questions: {
                     ...prev.questions,
                     [questionId]: {
                         ...q,
-                        totalTimeSpent,
-                        usedTime: q.timeLimit > 0 ? Math.min(totalTimeSpent, q.timeLimit) : totalTimeSpent,
+                        totalTimeSpent: newTotalTimeSpent,
+                        usedTime: newTotalTimeSpent,
+                        overtimeSeconds: overtime,
+                        questionShownAt: null, // Reset so we don't double count if called again without start
                     },
                 },
             };
@@ -197,6 +202,18 @@ export function useMetrics() {
             return 'stable';
         };
 
+        const actualQuestionsAnswered = Object.values(metrics.questions).filter(
+            q => (q.answerChanges && q.answerChanges > 0) || (q.responseLength && q.responseLength > 0)
+        ).length;
+
+        const skippedQuestions = Object.values(metrics.questions).filter(
+            q => (!q.answerChanges || q.answerChanges === 0) && (!q.responseLength || q.responseLength === 0)
+        ).length;
+
+        const overtimeCount = Object.values(metrics.questions).filter(
+            q => q.overtimeSeconds > 0
+        ).length;
+
         return {
             totalTime,
             avgResponseTime,
@@ -206,8 +223,10 @@ export function useMetrics() {
             overthinkingCount,
             totalAnswerChanges,
             backtrackCount: metrics.backtrackCount,
-            questionsAnswered: Object.keys(metrics.questions).length,
+            questionsAnswered: actualQuestionsAnswered,
             totalResponseLength,
+            skippedQuestions,
+            overtimeCount,
             timeTrend: calculateTimeTrend(),
             decisionStyle: rushedDecisions > 2 ? 'impulsive' : (overthinkingCount > 2 ? 'deliberate' : 'balanced'),
         };
