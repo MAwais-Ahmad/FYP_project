@@ -50,10 +50,9 @@ export function QuizScreen({
     const isFirstQuestion = currentQuestionIndex === 0;
     const isLastQuestion = currentQuestionIndex === questions.length - 1;
 
-    // Per-question timer (counts into overtime, no auto-kick)
-    const questionTimer = useTimer(question?.timeLimit || 0);
-
-    // Overall scenario timer (counts down from totalTimeLimit)
+    // Overall scenario timer (counts down from totalTimeLimit) — the only timer
+    // shown to the student. Per-question limits still exist behind the scenes
+    // (recorded below) and drive the overtime / behavioural metrics unchanged.
     const overallTimer = useTimer(scenario.totalTimeLimit || 600);
     const overallStarted = useRef(false);
 
@@ -66,16 +65,11 @@ export function QuizScreen({
         }
     }, [scenario.totalTimeLimit]);
 
-    // Per-question timer management
+    // Per-question metric tracking (no visible per-question timer). The question's
+    // timeLimit is still recorded so overtimeSeconds / overtimeCount keep working.
     useEffect(() => {
         if (question) {
             onQuestionStart(question.id, question.timeLimit, question.phase);
-            if (question.timeLimit > 0) {
-                questionTimer.reset(question.timeLimit);
-                questionTimer.start(question.timeLimit);
-            } else {
-                questionTimer.stop();
-            }
         }
         return () => {
             if (question) onQuestionEnd(question.id);
@@ -84,7 +78,6 @@ export function QuizScreen({
 
     // Local state for composite question types
     const [ranking, setRanking] = useState([1, 2, 3]);
-    const [explanation, setExplanation] = useState('');
     const [multiTextValues, setMultiTextValues] = useState(['', '', '']);
 
     // Restore or reset local state when question changes
@@ -186,13 +179,11 @@ export function QuizScreen({
                     <RankingQuestion
                         question={question}
                         ranking={ranking}
-                        explanation=""
                         solutions={plannedSolutions}
                         onRankingChange={newRanking => {
                             setRanking(newRanking);
                             onAnswer(question.id, newRanking.join(','));
                         }}
-                        onExplanationChange={() => {}} // obsolete
                         onFirstInteraction={() => onFirstInteraction(question.id)}
                         onAnswerChange={() => onAnswerChange(question.id)}
                     />
@@ -227,19 +218,6 @@ export function QuizScreen({
     if (!question) return <div>Loading question...</div>;
 
     // Timer status classes
-    const getQuestionTimerClasses = () => {
-        switch (questionTimer.timerStatus) {
-            case 'overtime':
-                return 'bg-orange-500/20 border-orange-400/40 text-orange-300';
-            case 'critical':
-                return 'timer-critical';
-            case 'warning':
-                return 'timer-warning';
-            default:
-                return '';
-        }
-    };
-
     const getOverallTimerClasses = () => {
         switch (overallTimer.timerStatus) {
             case 'overtime':
@@ -279,31 +257,17 @@ export function QuizScreen({
                     </span>
                 </div>
 
-                {/* Dual Timers */}
+                {/* Overall scenario timer (only visible timer) */}
                 <div className="flex items-center gap-2">
-                    {question.timeLimit > 0 ? (
-                        <div className={`timer-container !px-3 !py-1 ${getQuestionTimerClasses()}`} title="Time for this question">
+                    {scenario.totalTimeLimit && scenario.totalTimeLimit > 0 && (
+                        <div
+                            className={`px-3 py-1.5 rounded-full border text-sm font-mono font-medium flex items-center gap-1.5 ${getOverallTimerClasses()}`}
+                            title="Total time remaining for this scenario"
+                        >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <circle cx="12" cy="12" r="10" />
                                 <path d="M12 6v6l4 2" />
                             </svg>
-                            <span className="font-mono font-medium text-sm">{questionTimer.formattedTime}</span>
-                            {questionTimer.isOvertime && (
-                                <span className="text-[10px] uppercase font-bold text-orange-400 tracking-wider">OT</span>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs">
-                            ✨ No limit
-                        </div>
-                    )}
-
-                    {scenario.totalTimeLimit && scenario.totalTimeLimit > 0 && (
-                        <div
-                            className={`px-3 py-1 rounded-full border text-xs font-mono font-medium flex items-center gap-1.5 ${getOverallTimerClasses()}`}
-                            title="Total time for this scenario"
-                        >
-                            <span className="text-[10px] uppercase font-bold tracking-wider opacity-60">Total</span>
                             <span>{overallTimer.formattedTime}</span>
                         </div>
                     )}

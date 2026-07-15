@@ -78,10 +78,23 @@ const INTERACTIVE_TYPES = [
 ];
 
 const TEXT_TYPES = [
-  { phaseName: 'Understanding', type: 'text', desc: 'Identify the CORE tension / underlying problem in this specific story.', timeRange: '60-120s' },
-  { phaseName: 'Collaboration', type: 'text', desc: 'Write exactly what you would say to persuade, delegate, or manage a specific person in the story.', timeRange: '60-120s' },
+  { phaseName: 'Understanding', type: 'text', desc: 'Identify the CORE tension / underlying problem in this specific story.', timeRange: '60s' },
+  { phaseName: 'Collaboration', type: 'text', desc: 'Write exactly what you would say to persuade, delegate, or manage a specific person in the story.', timeRange: '60s' },
   { phaseName: 'Reflection', type: 'reflection', desc: 'Hindsight, calibration and honest self-grading.', timeRange: '0 (unlimited)' }
 ];
+
+// Fixed, challenge-tuned per-question time limits (seconds) by question type.
+// The student never sees a per-question timer, but these still power the
+// overtime/behavioural metrics AND the tight overall scenario limit.
+const TIME_BY_TYPE = {
+  text: 60,
+  mcq: 40,          // normal MCQ
+  'mcq-urgent': 30, // urgent twist — high pressure
+  ranking: 60,
+  slider: 45,
+  'multi-text': 90,
+  reflection: 0,    // unlimited
+};
 
 // Fisher–Yates shuffle
 function shuffle(arr) {
@@ -283,8 +296,8 @@ IMPORTANT RULES:
 5. Use Pakistani Rupees (Rs.) for any money amounts.
 6. Include cultural nuances where relevant (family expectations, social pressure, izzat/reputation).
 7. SHUFFLE STRUCTURAL DETAILS: invent fresh stakeholder names, resource values, deadlines and numbers every time — never reuse a template.
-8. Set each "timeLimit" (in seconds) DYNAMICALLY within the suggested range based on that question's real complexity.
-9. Set "totalTimeLimit" = sum of all 12 question timeLimits + 30% buffer, rounded to nearest 30s.
+8. You may include a "timeLimit" per question, but it is optional — the server assigns fixed challenge timings by question type, so do not agonise over it.
+9. "totalTimeLimit" is computed automatically by the server; you may omit it.
 
 CRITICAL — QUESTION STRUCTURE (anti-predictability):
 You MUST output EXACTLY 12 questions, in the EXACT order, ids, phases, phaseNames and types listed below.
@@ -336,20 +349,23 @@ Return ONLY this JSON structure (questions array must follow the shuffled order 
       data.questions = data.questions.slice(0, 12).map((q, i) => {
         const spec = phaseOrder[i] || phaseOrder[phaseOrder.length - 1];
         const type = allowedTypes.has(q.type) ? q.type : spec.type;
-        const tl = typeof q.timeLimit === 'string' ? parseInt(q.timeLimit) : q.timeLimit;
         return {
           ...q,
           id: i + 1,
           phase: q.phase || spec.phase,
           phaseName: q.phaseName || spec.phaseName,
           type,
-          timeLimit: type === 'reflection' ? 0 : (Number.isFinite(tl) && tl > 0 ? tl : 60),
+          // Fixed per-type limit (ignore whatever the model returned) so timing
+          // is a consistent challenge. Still recorded for behavioural metrics.
+          timeLimit: TIME_BY_TYPE[type] ?? 40,
         };
       });
     }
-    if (data.scenario && (!data.scenario.totalTimeLimit || data.scenario.totalTimeLimit < 60)) {
+    // Always derive a TIGHT overall limit from the fixed per-question times
+    // (no fat buffer) so the scenario timer is a genuine challenge.
+    if (data.scenario) {
       const sum = (data.questions || []).reduce((s, q) => s + (q.timeLimit || 0), 0);
-      data.scenario.totalTimeLimit = Math.max(300, Math.round((sum * 1.3) / 30) * 30);
+      data.scenario.totalTimeLimit = Math.max(180, Math.round(sum / 30) * 30);
     }
 
     totalTokensUsed += completion.usage.total_tokens;

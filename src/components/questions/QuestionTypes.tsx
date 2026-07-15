@@ -192,10 +192,8 @@ export function MultiTextQuestion({
 interface RankingQuestionProps {
     question: Question;
     ranking: number[];
-    explanation: string;
     solutions: string[]; // actual solutions typed in Q3
     onRankingChange: (ranking: number[]) => void;
-    onExplanationChange: (text: string) => void;
     onFirstInteraction: () => void;
     onAnswerChange: () => void;
 }
@@ -203,10 +201,8 @@ interface RankingQuestionProps {
 export function RankingQuestion({
     question,
     ranking,
-    explanation,
     solutions,
     onRankingChange,
-    onExplanationChange,
     onFirstInteraction,
     onAnswerChange,
 }: RankingQuestionProps) {
@@ -342,6 +338,7 @@ export function ReflectionQuestion({
                     </span>
                 </div>
             </div>
+        </div>
     );
 }
 

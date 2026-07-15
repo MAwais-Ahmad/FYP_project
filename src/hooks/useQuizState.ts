@@ -35,7 +35,7 @@ const getFallbackData = (): { scenario: Scenario; questions: Question[] } => ({
         context_details: '• Drama Club: Rs.20,000\n• Science Club: Rs.18,000\n• Sports Club: Rs.15,000\n• Art Club: Rs.12,000\n• Music Club: Rs.10,000',
         constraint: 'Total requested = Rs.75,000 — that is Rs.25,000 over your budget!',
         urgency: 'The principal needs your final breakdown by 9 AM tomorrow.',
-        totalTimeLimit: 660,
+        totalTimeLimit: 510,
     },
     questions: [
         { id: 1, phase: 1, phaseName: 'Information Filtering', type: 'mcq', timeLimit: 45, question: 'Which piece of information is most critical to verify first?', options: ['The total sponsorship amount', 'The detailed breakdown of Drama Club\'s request', 'The principal\'s hard deadline', 'Whether any clubs can share resources'] },
