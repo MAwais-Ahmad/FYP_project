@@ -213,13 +213,16 @@ export function RankingQuestion({
     const [hasInteracted, setHasInteracted] = useState(false);
     const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
-    // Display the actual student solution or fall back to a placeholder
+    // Display the option provided by AI, fallback to student solution, fallback to generic
     const displayLabel = (rankValue: number): string => {
+        if (question.options && question.options.length >= rankValue) {
+            return question.options[rankValue - 1];
+        }
         const sol = solutions[rankValue - 1];
         if (sol && sol.trim().length > 0) {
             return sol.length > 80 ? sol.slice(0, 77) + '...' : sol;
         }
-        return `Strategy ${rankValue}`;
+        return `Option ${rankValue}`;
     };
 
     const handleDragStart = (idx: number) => {
@@ -242,7 +245,7 @@ export function RankingQuestion({
         setDraggedIdx(null);
     };
 
-    const rankLabels = ['🥇 Best', '🥈 Second', '🥉 Third'];
+    const rankLabels = ['🥇 1st', '🥈 2nd', '🥉 3rd', '4th', '5th'];
 
     return (
         <div className="space-y-4">
@@ -275,24 +278,6 @@ export function RankingQuestion({
                 ))}
             </div>
 
-            <div className="space-y-2 pt-2">
-                <label className="text-sm text-white/70 font-medium">
-                    Explain your ranking — why is your best strategy better than the others?
-                </label>
-                <textarea
-                    className="text-input"
-                    value={explanation}
-                    onChange={e => {
-                        if (!hasInteracted) {
-                            setHasInteracted(true);
-                            onFirstInteraction();
-                        }
-                        onExplanationChange(e.target.value);
-                    }}
-                    placeholder="Explain your reasoning here..."
-                    rows={3}
-                />
-            </div>
         </div>
     );
 }
@@ -355,6 +340,78 @@ export function ReflectionQuestion({
                     <span className="absolute bottom-3 right-3 text-white/40 text-sm">
                         {words} word{words === 1 ? '' : 's'}
                     </span>
+                </div>
+            </div>
+    );
+}
+
+// ─── SLIDER QUESTION ─────────────────────────────────────────────────────────
+
+interface SliderQuestionProps {
+    question: Question;
+    value: number | string;
+    onChange: (val: number | string) => void;
+    onFirstInteraction: () => void;
+    onAnswerChange: () => void;
+}
+
+export function SliderQuestion({
+    question,
+    value,
+    onChange,
+    onFirstInteraction,
+    onAnswerChange,
+}: SliderQuestionProps) {
+    const [hasInteracted, setHasInteracted] = useState(false);
+
+    const min = question.min ?? 0;
+    const max = question.max ?? 100;
+    const unit = question.unit ?? '';
+    
+    // Default to midpoint if no value yet
+    const numericValue = typeof value === 'number' ? value : (typeof value === 'string' && value !== '' ? parseFloat(value) : min);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!hasInteracted) {
+            setHasInteracted(true);
+            onFirstInteraction();
+        }
+        onChange(parseFloat(e.target.value));
+    };
+
+    const handleMouseUp = () => {
+        if (hasInteracted) {
+            onAnswerChange();
+        }
+    };
+
+    return (
+        <div className="space-y-6">
+            <h3 className="text-xl font-medium leading-relaxed">{question.question}</h3>
+            {question.hint && (
+                <p className="text-white/60 text-sm">💡 {question.hint}</p>
+            )}
+
+            <div className="bg-white/5 p-6 rounded-xl border border-white/10 flex flex-col items-center space-y-4">
+                <div className="text-3xl font-bold text-primary-400">
+                    {numericValue} <span className="text-lg text-white/50">{unit}</span>
+                </div>
+                
+                <input 
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={Math.max(1, (max - min) / 100)}
+                    value={numericValue}
+                    onChange={handleChange}
+                    onMouseUp={handleMouseUp}
+                    onTouchEnd={handleMouseUp}
+                    className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                />
+                
+                <div className="flex justify-between w-full text-sm font-medium text-white/40">
+                    <span>{min} {unit}</span>
+                    <span>{max} {unit}</span>
                 </div>
             </div>
         </div>

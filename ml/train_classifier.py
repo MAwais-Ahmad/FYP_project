@@ -6,10 +6,10 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import json
 import os
 
-def serialize_tree(decision_tree, feature_names):
+def serialize_tree(decision_tree, feature_names, class_names):
     tree_ = decision_tree.tree_
-    # Convert classes to plain Python strings so JSON keys are class name strings, not numpy types
-    classes = [str(c) for c in decision_tree.classes_]
+    # Use the global class names passed from the Random Forest
+    classes = [str(c) for c in class_names]
     
     def recurse(node):
         # In sklearn, leaf nodes have children_left[node] == -1
@@ -110,7 +110,7 @@ def train_and_export():
             "time_trend": time_trend_map,
             "decision_style": decision_style_map
         },
-        "trees": [serialize_tree(estimator, feature_names) for estimator in clf.estimators_]
+        "trees": [serialize_tree(estimator, feature_names, clf.classes_) for estimator in clf.estimators_]
     }
     
     json_path = 'ml/random_forest_model.json'

@@ -19,7 +19,7 @@ export interface Scenario {
     totalTimeLimit?: number;
 }
 
-export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection';
+export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection' | 'slider';
 
 export interface Question {
     id: number;
@@ -32,6 +32,10 @@ export interface Question {
     options?: string[];
     context?: string;
     urgentUpdate?: string;
+    // Slider specific properties
+    min?: number;
+    max?: number;
+    unit?: string;
 }
 
 export interface QuestionMetrics {

@@ -64,17 +64,23 @@ const scenarioFormats = [
   },
 ];
 
-// ─── 7 COGNITIVE PHASES (Improvement #8 — anti-predictability) ────────────────
-// Each session is exactly 7 questions, one per cognitive phase, but their DISPLAY
-// ORDER is shuffled every time (phases 1-6 shuffled; Reflection always closes).
-const COGNITIVE_PHASES = [
-  { phase: 1, phaseName: 'Understanding',        type: 'text',       desc: 'Identify the CORE tension / underlying problem in this specific story.', timeRange: '60-120s' },
-  { phase: 2, phaseName: 'Information Filtering', type: 'mcq',        desc: 'Decide which piece of data/file/resource/person to trust MOST before acting.', timeRange: '30-60s' },
-  { phase: 3, phaseName: 'Planning',             type: 'multi-text', desc: 'Propose THREE distinct strategies/approaches for THIS situation.', timeRange: '90-180s' },
-  { phase: 4, phaseName: 'Risk Mitigation',      type: 'mcq',        desc: 'Identify the biggest failure point or the smartest Plan B for this story.', timeRange: '40-70s' },
-  { phase: 5, phaseName: 'Execution Twist',      type: 'mcq-urgent', desc: 'React under pressure to a SUDDEN change/crisis unique to this story.', timeRange: '30-45s' },
-  { phase: 6, phaseName: 'Collaboration',        type: 'text',       desc: 'Persuade, delegate, or manage a specific person/relationship in the story.', timeRange: '60-120s' },
-  { phase: 7, phaseName: 'Reflection',           type: 'reflection', desc: 'Hindsight, calibration and honest self-grading.', timeRange: '0 (unlimited)' },
+// ─── DYNAMIC QUESTION PHASES (12 per scenario) ────────────────────────────────
+// Scenario 1 & 2: 12 Interactive questions (mcq, ranking, slider, mcq-urgent).
+// Scenario 3: 9 interactive, 3 text/reflection.
+
+const INTERACTIVE_TYPES = [
+  { phaseName: 'Information Filtering', type: 'mcq', desc: 'Decide which piece of data/file/resource/person to trust MOST before acting.', timeRange: '30-60s' },
+  { phaseName: 'Planning', type: 'ranking', desc: 'Rank these 3-4 strategies from most effective to least effective for THIS situation.', timeRange: '45-90s' },
+  { phaseName: 'Risk Mitigation', type: 'mcq', desc: 'Identify the biggest failure point or the smartest Plan B for this story.', timeRange: '40-70s' },
+  { phaseName: 'Resource Allocation', type: 'slider', desc: 'Distribute a limited budget, time, or personnel across 2-4 competing priorities. (Output slider min/max/unit)', timeRange: '60-120s' },
+  { phaseName: 'Execution Twist', type: 'mcq-urgent', desc: 'React under pressure to a SUDDEN change/crisis unique to this story.', timeRange: '20-40s' },
+  { phaseName: 'Ethical Dilemma', type: 'mcq', desc: 'Make a tough choice between doing the right thing vs the popular/easy thing.', timeRange: '40-70s' }
+];
+
+const TEXT_TYPES = [
+  { phaseName: 'Understanding', type: 'text', desc: 'Identify the CORE tension / underlying problem in this specific story.', timeRange: '60-120s' },
+  { phaseName: 'Collaboration', type: 'text', desc: 'Write exactly what you would say to persuade, delegate, or manage a specific person in the story.', timeRange: '60-120s' },
+  { phaseName: 'Reflection', type: 'reflection', desc: 'Hindsight, calibration and honest self-grading.', timeRange: '0 (unlimited)' }
 ];
 
 // Fisher–Yates shuffle
@@ -87,11 +93,36 @@ function shuffle(arr) {
   return a;
 }
 
-// Build a shuffled phase ORDER: phases 1-6 randomised, Reflection (7) always last.
-function buildShuffledPhaseOrder() {
-  const firstSix = COGNITIVE_PHASES.filter(p => p.phase !== 7);
-  const reflection = COGNITIVE_PHASES.find(p => p.phase === 7);
-  return [...shuffle(firstSix), reflection];
+// Build a dynamic phase order of 12 questions based on scenario number
+function buildPhaseOrder(scenarioNumber) {
+  let selected = [];
+  
+  if (scenarioNumber <= 2) {
+    // 12 Interactive Questions
+    // We have 6 interactive types, so we pick 2 of each and shuffle
+    for (let i = 0; i < 2; i++) {
+      selected.push(...INTERACTIVE_TYPES);
+    }
+    selected = shuffle(selected);
+  } else {
+    // Scenario 3: 9 Interactive, 3 Text (including Reflection)
+    for (let i = 0; i < 9; i++) {
+      selected.push(INTERACTIVE_TYPES[i % INTERACTIVE_TYPES.length]);
+    }
+    selected = shuffle(selected);
+    
+    // Add 3 text types at the end (Reflection is always absolute last)
+    selected.push(TEXT_TYPES[0]); // Understanding
+    selected.push(TEXT_TYPES[1]); // Collaboration
+    selected.push(TEXT_TYPES[2]); // Reflection
+  }
+
+  // Assign IDs and Phases sequentially
+  return selected.map((item, index) => ({
+    id: index + 1,
+    phase: index + 1,
+    ...item
+  }));
 }
 
 // ─── 50+ LOCALISED PAKISTANI SCENARIO SEEDS (Improvement #8) ──────────────────
@@ -206,13 +237,13 @@ app.post('/api/generate-scenario', async (req, res) => {
     const difficultyPrompt = getDifficultyPrompt(difficultyLevel);
     const adaptiveContext = getAdaptiveContext(difficultySignal, scenarioNumber);
 
-    // Anti-predictability: pick a random localised seed + shuffle the 7 cognitive phases
+    // Anti-predictability: pick a random localised seed + dynamically generate 12 phases
     const randomSeed = SCENARIO_SEEDS[Math.floor(Math.random() * SCENARIO_SEEDS.length)];
-    const phaseOrder = buildShuffledPhaseOrder();
+    const phaseOrder = buildPhaseOrder(scenarioNumber);
 
-    // Describe the exact 7 questions (in their shuffled display order) for the LLM.
+    // Describe the exact 12 questions (in their display order) for the LLM.
     const phaseSpec = phaseOrder
-      .map((p, idx) => `  ${idx + 1}. id=${idx + 1} | phase=${p.phase} | phaseName="${p.phaseName}" | type=${p.type} | timeLimit≈${p.timeRange} | TASK: ${p.desc}`)
+      .map((p, idx) => `  ${idx + 1}. id=${p.id} | phase=${p.phase} | phaseName="${p.phaseName}" | type=${p.type} | timeLimit≈${p.timeRange} | TASK: ${p.desc}`)
       .join('\n');
 
     const diversityPrompt = previousThemes.length > 0
@@ -253,16 +284,19 @@ IMPORTANT RULES:
 6. Include cultural nuances where relevant (family expectations, social pressure, izzat/reputation).
 7. SHUFFLE STRUCTURAL DETAILS: invent fresh stakeholder names, resource values, deadlines and numbers every time — never reuse a template.
 8. Set each "timeLimit" (in seconds) DYNAMICALLY within the suggested range based on that question's real complexity.
-9. Set "totalTimeLimit" = sum of all 7 question timeLimits + 30% buffer, rounded to nearest 30s.
+9. Set "totalTimeLimit" = sum of all 12 question timeLimits + 30% buffer, rounded to nearest 30s.
 
 CRITICAL — QUESTION STRUCTURE (anti-predictability):
-You MUST output EXACTLY 7 questions, in the EXACT order, ids, phases, phaseNames and types listed below.
+You MUST output EXACTLY 12 questions, in the EXACT order, ids, phases, phaseNames and types listed below.
 This order is RANDOMISED for this session — honour it precisely so the experience is never repetitive:
 ${phaseSpec}
 
 Type-specific requirements:
 - type "text": include a helpful "hint". May include "context" describing an aftermath/situation.
 - type "mcq": include exactly 4 plausible, scenario-specific "options" (no obvious throwaway answers).
+- type "ranking": include exactly 3-4 plausible, scenario-specific "options" to be ranked.
+- type "slider": must include "min", "max", and "unit" (e.g. "Rs.", "Days", "Hours") for budget/resource allocation.
+- type "mcq-urgent": include "urgentUpdate" (a surprising twist/alert) and 4 options reacting to it.
 - type "multi-text": ask for 3 distinct approaches; include a "hint". (The UI shows 3 input boxes.)
 - type "mcq-urgent": include a vivid "urgentUpdate" (a sudden twist UNIQUE to this story, prefixed with 🚨) AND exactly 4 "options". Keep it tight and high-pressure. The twist must be freshly generated, never a stock template.
 - type "reflection": timeLimit MUST be 0. Ask ONLY: "Looking back, what would you do differently and why?" (Do NOT ask the student to self-rate a confidence number — confidence is measured automatically.)
@@ -295,11 +329,11 @@ Return ONLY this JSON structure (questions array must follow the shuffled order 
       data.scenario.totalTimeLimit = parseInt(data.scenario.totalTimeLimit) || 600;
     }
 
-    // ── Normalise questions to the shuffled 7-phase contract ──────────────────
+    // ── Normalise questions to the shuffled phase contract ──────────────────
     // Defends against LLM drift so the frontend always renders valid types/order.
-    const allowedTypes = new Set(['text', 'mcq', 'mcq-urgent', 'multi-text', 'ranking', 'reflection']);
+    const allowedTypes = new Set(['text', 'mcq', 'mcq-urgent', 'multi-text', 'ranking', 'reflection', 'slider']);
     if (Array.isArray(data.questions)) {
-      data.questions = data.questions.slice(0, 7).map((q, i) => {
+      data.questions = data.questions.slice(0, 12).map((q, i) => {
         const spec = phaseOrder[i] || phaseOrder[phaseOrder.length - 1];
         const type = allowedTypes.has(q.type) ? q.type : spec.type;
         const tl = typeof q.timeLimit === 'string' ? parseInt(q.timeLimit) : q.timeLimit;

@@ -7,6 +7,7 @@ import {
     MultiTextQuestion,
     RankingQuestion,
     ReflectionQuestion,
+    SliderQuestion,
 } from '../questions/QuestionTypes';
 import { useTimer } from '../../hooks/useTimer';
 
@@ -92,13 +93,14 @@ export function QuizScreen({
         const savedAnswer = answers[question.id];
 
         if (question.type === 'ranking') {
-            if (typeof savedAnswer === 'string' && savedAnswer.includes('|')) {
-                const [rankStr, exp] = savedAnswer.split('|');
+            if (typeof savedAnswer === 'string' && savedAnswer.length > 0) {
+                // Backward compatibility: if it has a pipe, it's the old format
+                const rankStr = savedAnswer.includes('|') ? savedAnswer.split('|')[0] : savedAnswer;
                 setRanking(rankStr.split(',').map(Number));
-                setExplanation(exp || '');
             } else {
-                setRanking([1, 2, 3]);
-                setExplanation('');
+                const optionsCount = question.options?.length || 3;
+                const defaultRanking = Array.from({ length: optionsCount }, (_, i) => i + 1);
+                setRanking(defaultRanking);
             }
         }
         if (question.type === 'multi-text') {
@@ -129,7 +131,7 @@ export function QuizScreen({
         if (a == null) return false;
         if (Array.isArray(a)) return a.some(s => (s || '').trim().length > 0);
         const s = String(a);
-        if (q.type === 'ranking') return (s.split('|')[1] || '').trim().length > 0;
+        if (q.type === 'ranking') return s.trim().length > 0; // The string is just "1,2,3" which is valid
         return s.trim().length > 0;
     };
 
@@ -184,16 +186,13 @@ export function QuizScreen({
                     <RankingQuestion
                         question={question}
                         ranking={ranking}
-                        explanation={explanation}
+                        explanation=""
                         solutions={plannedSolutions}
                         onRankingChange={newRanking => {
                             setRanking(newRanking);
-                            onAnswer(question.id, `${newRanking.join(',')}|${explanation}`);
+                            onAnswer(question.id, newRanking.join(','));
                         }}
-                        onExplanationChange={text => {
-                            setExplanation(text);
-                            onAnswer(question.id, `${ranking.join(',')}|${text}`);
-                        }}
+                        onExplanationChange={() => {}} // obsolete
                         onFirstInteraction={() => onFirstInteraction(question.id)}
                         onAnswerChange={() => onAnswerChange(question.id)}
                     />
@@ -206,6 +205,17 @@ export function QuizScreen({
                         value={(answers[question.id] as string) || ''}
                         onChange={text => onAnswer(question.id, text)}
                         onFirstInteraction={() => onFirstInteraction(question.id)}
+                    />
+                );
+
+            case 'slider':
+                return (
+                    <SliderQuestion
+                        question={question}
+                        value={(answers[question.id] as number | string) || ''}
+                        onChange={val => onAnswer(question.id, String(val))}
+                        onFirstInteraction={() => onFirstInteraction(question.id)}
+                        onAnswerChange={() => onAnswerChange(question.id)}
                     />
                 );
 
