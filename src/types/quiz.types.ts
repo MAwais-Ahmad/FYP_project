@@ -19,7 +19,7 @@ export interface Scenario {
     totalTimeLimit?: number;
 }
 
-export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection' | 'slider';
+export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection' | 'slider' | 'vark';
 
 export interface Question {
     id: number;
@@ -30,6 +30,7 @@ export interface Question {
     question: string;
     hint?: string;
     options?: string[];
+    varkMapping?: string[];
     context?: string;
     urgentUpdate?: string;
     // Slider specific properties
@@ -124,6 +125,7 @@ export interface ScenarioResult {
     performanceScore: number;
     accuracyScore: number;
     cognitive: CognitiveFeatures;
+    vark?: { visual: number; auditory: number; readWrite: number; kinesthetic: number };
     avgTimeToStart: number;
     totalResponseLength: number;
     skippedQuestions: number;

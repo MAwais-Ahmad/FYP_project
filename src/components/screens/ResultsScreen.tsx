@@ -316,6 +316,75 @@ export function ResultsScreen({
                 </div>
             </div>
 
+            {/* ── VARK SENSORY PREFERENCE CHART ──────────────────────────────── */}
+            {latest?.vark && (
+                <div className="glass-card p-6 space-y-4">
+                    <h3 className="font-semibold text-sm uppercase tracking-wide text-white/70 flex items-center gap-2">
+                        🎧 Sensory Learning Style (VARK)
+                    </h3>
+                    <p className="text-xs text-white/50 leading-relaxed max-w-xl">
+                        This indicates how your brain prefers to absorb study material (Visual, Auditory, Read/Write, Kinesthetic). Click details below for customized suggestions.
+                    </p>
+                    <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6 pt-2">
+                        {/* Visual */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between text-xs font-semibold text-white/70">
+                                <span className="flex items-center gap-1.5">🎥 Visual (Video/Images)</span>
+                                <span>{Math.round(latest.vark.visual * 100)}%</span>
+                            </div>
+                            <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
+                                <div 
+                                    className="h-full rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 transition-all duration-1000" 
+                                    style={{ width: `${latest.vark.visual * 100}%` }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Auditory */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between text-xs font-semibold text-white/70">
+                                <span className="flex items-center gap-1.5">🎧 Auditory (Sound/Voice)</span>
+                                <span>{Math.round(latest.vark.auditory * 100)}%</span>
+                            </div>
+                            <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
+                                <div 
+                                    className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-1000" 
+                                    style={{ width: `${latest.vark.auditory * 100}%` }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Read/Write */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between text-xs font-semibold text-white/70">
+                                <span className="flex items-center gap-1.5">📝 Read/Write (Text/Docs)</span>
+                                <span>{Math.round(latest.vark.readWrite * 100)}%</span>
+                            </div>
+                            <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
+                                <div 
+                                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-1000" 
+                                    style={{ width: `${latest.vark.readWrite * 100}%` }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Kinesthetic */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between text-xs font-semibold text-white/70">
+                                <span className="flex items-center gap-1.5">🛠️ Kinesthetic (Hands-on)</span>
+                                <span>{Math.round(latest.vark.kinesthetic * 100)}%</span>
+                            </div>
+                            <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
+                                <div 
+                                    className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-1000" 
+                                    style={{ width: `${latest.vark.kinesthetic * 100}%` }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ── PERSONALIZED RECOMMENDATIONS ───────────────────────────────── */}
             {primary && (
                 <div className="glass-card p-6 space-y-4">

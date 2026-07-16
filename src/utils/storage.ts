@@ -33,6 +33,7 @@ export interface StudentRecord {
     avgResponseTime: number;
     decisionStyle: string;
     cognitive: CognitiveFeatures;
+    vark?: { visual: number; auditory: number; readWrite: number; kinesthetic: number; } | null;
 
     // Full detail for drill-down
     overall: OverallMetrics;
@@ -112,5 +113,6 @@ export function buildRecord(
         },
         overall,
         scenarioResults,
+        vark: latest?.vark ?? null,
     };
 }

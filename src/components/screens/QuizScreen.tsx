@@ -149,6 +149,7 @@ export function QuizScreen({
                     />
                 );
 
+            case 'vark':
             case 'mcq':
             case 'mcq-urgent':
                 return (

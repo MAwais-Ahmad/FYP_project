@@ -53,6 +53,7 @@ export function StudentDashboard({ studentName, onBack, onStartNew }: StudentDas
                         cognitive: dbRec.cognitive,
                         overall: dbRec.overall,
                         scenarioResults: dbRec.scenarioResults,
+                        vark: dbRec.vark,
                     }));
                     setRecords(mapped.sort((a, b) => b.date.localeCompare(a.date)));
                 }
@@ -120,6 +121,53 @@ export function StudentDashboard({ studentName, onBack, onStartNew }: StudentDas
                                 <div>
                                     <div className="text-2xl font-bold">{Math.round(latest.accuracyScore * 100)}%</div>
                                     <div className="text-xs text-white/40">Accuracy</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* VARK sensory learning preference */}
+                    {latest?.vark && (
+                        <div className="glass-card p-6 space-y-4">
+                            <h2 className="text-lg font-semibold flex items-center gap-2">
+                                🎧 Sensory Learning Preference (VARK)
+                            </h2>
+                            <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs text-white/60">
+                                        <span>🎥 Visual</span>
+                                        <span>{Math.round((latest.vark.visual || 0) * 100)}%</span>
+                                    </div>
+                                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                        <div className="h-full bg-indigo-500" style={{ width: `${(latest.vark.visual || 0) * 100}%` }} />
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs text-white/60">
+                                        <span>🎧 Auditory</span>
+                                        <span>{Math.round((latest.vark.auditory || 0) * 100)}%</span>
+                                    </div>
+                                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                        <div className="h-full bg-cyan-500" style={{ width: `${(latest.vark.auditory || 0) * 100}%` }} />
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs text-white/60">
+                                        <span>📝 Read/Write</span>
+                                        <span>{Math.round((latest.vark.readWrite || 0) * 100)}%</span>
+                                    </div>
+                                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                        <div className="h-full bg-emerald-500" style={{ width: `${(latest.vark.readWrite || 0) * 100}%` }} />
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs text-white/60">
+                                        <span>🛠️ Kinesthetic</span>
+                                        <span>{Math.round((latest.vark.kinesthetic || 0) * 100)}%</span>
+                                    </div>
+                                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                        <div className="h-full bg-amber-500" style={{ width: `${(latest.vark.kinesthetic || 0) * 100}%` }} />
+                                    </div>
                                 </div>
                             </div>
                         </div>

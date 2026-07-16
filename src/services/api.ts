@@ -40,6 +40,12 @@ interface EvaluateScenarioResponse {
     evaluation: {
         accuracy_score: number;
         cognitive_features: CognitiveFeatures;
+        vark?: {
+            visual: number;
+            auditory: number;
+            readWrite: number;
+            kinesthetic: number;
+        };
     };
     usage: {
         tokens: number;

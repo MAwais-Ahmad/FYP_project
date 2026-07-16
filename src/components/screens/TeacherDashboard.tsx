@@ -48,6 +48,7 @@ export function TeacherDashboard({ onBack }: TeacherDashboardProps) {
                         cognitive: dbRec.cognitive,
                         overall: dbRec.overall,
                         scenarioResults: dbRec.scenarioResults,
+                        vark: dbRec.vark,
                     }));
                     setRecords(mapped.sort((a, b) => b.date.localeCompare(a.date)));
                 }
@@ -73,6 +74,15 @@ export function TeacherDashboard({ onBack }: TeacherDashboardProps) {
         count: records.filter(r => r.primaryCategory === id).length,
     }));
     const maxCount = Math.max(1, ...distribution.map(d => d.count));
+
+    // Calculate average class VARK scores
+    const recordsWithVark = records.filter(r => r.vark);
+    const avgVark = {
+        visual: recordsWithVark.length ? recordsWithVark.reduce((s, r) => s + (r.vark?.visual || 0), 0) / recordsWithVark.length : 0.25,
+        auditory: recordsWithVark.length ? recordsWithVark.reduce((s, r) => s + (r.vark?.auditory || 0), 0) / recordsWithVark.length : 0.25,
+        readWrite: recordsWithVark.length ? recordsWithVark.reduce((s, r) => s + (r.vark?.readWrite || 0), 0) / recordsWithVark.length : 0.25,
+        kinesthetic: recordsWithVark.length ? recordsWithVark.reduce((s, r) => s + (r.vark?.kinesthetic || 0), 0) / recordsWithVark.length : 0.25,
+    };
 
     const handleClear = () => {
         if (confirm('Clear ALL stored assessment records? This cannot be undone.')) {
@@ -148,6 +158,36 @@ export function TeacherDashboard({ onBack }: TeacherDashboardProps) {
                             ))}
                         </div>
                     </div>
+
+                    {/* Class-wide VARK Preferences */}
+                    {recordsWithVark.length > 0 && (
+                        <div className="glass-card p-6 space-y-4">
+                            <h2 className="text-lg font-semibold flex items-center gap-2">
+                                🎧 Class Sensory Profile (Average VARK)
+                            </h2>
+                            <div className="space-y-3">
+                                {[
+                                    ['🎥 Visual (Video/Images)', avgVark.visual, 'bg-indigo-500'],
+                                    ['🎧 Auditory (Sound/Voice)', avgVark.auditory, 'bg-cyan-500'],
+                                    ['📝 Read/Write (Text/Docs)', avgVark.readWrite, 'bg-emerald-500'],
+                                    ['🛠️ Kinesthetic (Hands-on)', avgVark.kinesthetic, 'bg-amber-500'],
+                                ].map(([k, v, color]) => (
+                                    <div key={k as string} className="flex items-center gap-3">
+                                        <div className="w-52 shrink-0 text-sm truncate text-white/70">
+                                            {k}
+                                        </div>
+                                        <div className="flex-1 h-5 rounded-full bg-white/5 overflow-hidden">
+                                            <div
+                                                className={`h-full ${color} transition-all duration-500`}
+                                                style={{ width: `${(v as number) * 100}%` }}
+                                            />
+                                        </div>
+                                        <div className="w-12 text-right text-sm font-medium">{Math.round((v as number) * 100)}%</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Student registry */}
                     <div className="glass-card p-6 overflow-x-auto space-y-3">
@@ -238,6 +278,27 @@ export function TeacherDashboard({ onBack }: TeacherDashboardProps) {
                                 </div>
                             ))}
                         </div>
+
+                        {/* VARK sensory preference */}
+                        {selected.vark && (
+                            <div className="space-y-2">
+                                <h3 className="text-sm font-semibold text-white/70">Sensory Style (VARK)</h3>
+                                {[
+                                    ['🎥 Visual', selected.vark.visual, 'bg-indigo-500'],
+                                    ['🎧 Auditory', selected.vark.auditory, 'bg-cyan-500'],
+                                    ['📝 Read/Write', selected.vark.readWrite, 'bg-emerald-500'],
+                                    ['🛠️ Kinesthetic', selected.vark.kinesthetic, 'bg-amber-500'],
+                                ].map(([k, v, color]) => (
+                                    <div key={k as string} className="flex items-center gap-3">
+                                        <div className="w-40 text-xs text-white/50">{k}</div>
+                                        <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+                                            <div className={`h-full ${color}`} style={{ width: `${(v as number) * 100}%` }} />
+                                        </div>
+                                        <div className="w-10 text-right text-xs">{Math.round((v as number) * 100)}%</div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
 
                         {/* Per-round breakdown */}
                         <div className="space-y-2">
