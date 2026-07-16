@@ -78,8 +78,8 @@ const scenarioFormats = [
 ];
 
 // ─── DYNAMIC QUESTION PHASES (12 per scenario) ────────────────────────────────
-// Scenario 1 & 2: 12 Interactive questions (mcq, ranking, slider, mcq-urgent).
-// Scenario 3: 9 interactive, 3 text/reflection.
+// Scenario 1 & 2: 10 Interactive questions (mcq, ranking, slider, mcq-urgent) + 2 VARK questions.
+// Scenario 3: 7 interactive, 2 VARK, 3 text/reflection.
 
 const INTERACTIVE_TYPES = [
   { phaseName: 'Information Filtering', type: 'mcq', desc: 'Decide which piece of data/file/resource/person to trust MOST before acting.', timeRange: '30-60s' },
@@ -90,13 +90,20 @@ const INTERACTIVE_TYPES = [
   { phaseName: 'Ethical Dilemma', type: 'mcq', desc: 'Make a tough choice between doing the right thing vs the popular/easy thing.', timeRange: '40-70s' }
 ];
 
+const VARK_PHASE = {
+  phaseName: 'Learning Modality',
+  type: 'vark',
+  desc: 'Provide a contextual scenario choice where the student decides how they prefer to study, review, or verify critical details of the situation. Provide 4 options mapping to Visual, Auditory, Read-Write, and Kinesthetic methods.',
+  timeRange: '30-50s'
+};
+
 const TEXT_TYPES = [
   { phaseName: 'Understanding', type: 'text', desc: 'Identify the CORE tension / underlying problem in this specific story.', timeRange: '60s' },
   { phaseName: 'Collaboration', type: 'text', desc: 'Write exactly what you would say to persuade, delegate, or manage a specific person in the story.', timeRange: '60s' },
   { phaseName: 'Reflection', type: 'reflection', desc: 'Hindsight, calibration and honest self-grading.', timeRange: '0 (unlimited)' }
 ];
 
-const COGNITIVE_PHASES = [...INTERACTIVE_TYPES, ...TEXT_TYPES];
+const COGNITIVE_PHASES = [...INTERACTIVE_TYPES, ...TEXT_TYPES, VARK_PHASE];
 
 // Fixed, challenge-tuned per-question time limits (seconds) by question type.
 // The student never sees a per-question timer, but these still power the
@@ -109,6 +116,7 @@ const TIME_BY_TYPE = {
   slider: 45,
   'multi-text': 90,
   reflection: 0,    // unlimited
+  vark: 40,
 };
 
 // Fisher–Yates shuffle
@@ -126,17 +134,24 @@ function buildPhaseOrder(scenarioNumber) {
   let selected = [];
   
   if (scenarioNumber <= 2) {
-    // 12 Interactive Questions
-    // We have 6 interactive types, so we pick 2 of each and shuffle
+    // 10 Interactive Questions + 2 VARK Questions = 12 total
+    let interactivePool = [];
     for (let i = 0; i < 2; i++) {
-      selected.push(...INTERACTIVE_TYPES);
+      interactivePool.push(...INTERACTIVE_TYPES);
     }
+    interactivePool = shuffle(interactivePool).slice(0, 10);
+    
+    selected = [...interactivePool, VARK_PHASE, VARK_PHASE];
     selected = shuffle(selected);
   } else {
-    // Scenario 3: 9 Interactive, 3 Text (including Reflection)
-    for (let i = 0; i < 9; i++) {
-      selected.push(INTERACTIVE_TYPES[i % INTERACTIVE_TYPES.length]);
+    // Scenario 3: 7 Interactive, 2 VARK, 3 Text (including Reflection) = 12 total
+    let interactivePool = [];
+    for (let i = 0; i < 2; i++) {
+      interactivePool.push(...INTERACTIVE_TYPES);
     }
+    interactivePool = shuffle(interactivePool).slice(0, 7);
+    
+    selected = [...interactivePool, VARK_PHASE, VARK_PHASE];
     selected = shuffle(selected);
     
     // Add 3 text types at the end (Reflection is always absolute last)
@@ -152,6 +167,7 @@ function buildPhaseOrder(scenarioNumber) {
     ...item
   }));
 }
+
 
 // ─── 50+ LOCALISED PAKISTANI SCENARIO SEEDS (Improvement #8) ──────────────────
 const SCENARIO_SEEDS = [
@@ -326,6 +342,7 @@ Type-specific requirements:
 - type "slider": must include "min", "max", and "unit" (e.g. "Rs.", "Days", "Hours") for budget/resource allocation.
 - type "mcq-urgent": include "urgentUpdate" (a surprising twist/alert) and 4 options reacting to it.
 - type "multi-text": ask for 3 distinct approaches; include a "hint". (The UI shows 3 input boxes.)
+- type "vark": include exactly 4 options mapping directly to Visual, Auditory, Read-Write, and Kinesthetic learning preferences respectively. You MUST include a "varkMapping" array which contains exactly ["V", "A", "R", "K"] mapping to each of these options in their exact index order (e.g. if Option 1 is Visual, varkMapping[0] is 'V').
 - type "mcq-urgent": include a vivid "urgentUpdate" (a sudden twist UNIQUE to this story, prefixed with 🚨) AND exactly 4 "options". Keep it tight and high-pressure. The twist must be freshly generated, never a stock template.
 - type "reflection": timeLimit MUST be 0. Ask ONLY: "Looking back, what would you do differently and why?" (Do NOT ask the student to self-rate a confidence number — confidence is measured automatically.)
 
@@ -340,7 +357,7 @@ Return ONLY this JSON structure (questions array must follow the shuffled order 
     "totalTimeLimit": [number of seconds]
   },
   "questions": [
-    { "id": <n>, "phase": <cognitivePhaseNumber>, "phaseName": "<exact name>", "type": "<exact type>", "timeLimit": <seconds>, "question": "...", "hint": "...(text/multi-text)", "context": "...(optional, text only)", "options": ["...","...","...","..."], "urgentUpdate": "🚨 ...(mcq-urgent only)" }
+    { "id": <n>, "phase": <cognitivePhaseNumber>, "phaseName": "<exact name>", "type": "<exact type>", "timeLimit": <seconds>, "question": "...", "hint": "...(text/multi-text)", "context": "...(optional, text only)", "options": ["...","...","...","..."], "varkMapping": ["V", "A", "R", "K"], "urgentUpdate": "🚨 ...(mcq-urgent only)" }
   ]
 }`,
         },
@@ -359,9 +376,10 @@ Return ONLY this JSON structure (questions array must follow the shuffled order 
 
     // ── Normalise questions to the shuffled phase contract ──────────────────
     // Defends against LLM drift so the frontend always renders valid types/order.
-    const allowedTypes = new Set(['text', 'mcq', 'mcq-urgent', 'multi-text', 'ranking', 'reflection', 'slider']);
+    const allowedTypes = new Set(['text', 'mcq', 'mcq-urgent', 'multi-text', 'ranking', 'reflection', 'slider', 'vark']);
     if (Array.isArray(data.questions)) {
       data.questions = data.questions.slice(0, 12).map((q, i) => {
+
         const spec = phaseOrder[i] || phaseOrder[phaseOrder.length - 1];
         const type = allowedTypes.has(q.type) ? q.type : spec.type;
         return {
@@ -504,11 +522,64 @@ Return JSON format:
     totalTokensUsed += completion.usage.total_tokens;
     const estimatedCost = (completion.usage.prompt_tokens * 0.00000015) + (completion.usage.completion_tokens * 0.0000006);
 
-    console.log(`🧠 Evaluation | Acc: ${evaluation.accuracy_score} | ${completion.usage.total_tokens} tokens | ~$${estimatedCost.toFixed(4)}`);
+    // Extract vark score if vark questions exist
+    let varkSummary = { V: 0, A: 0, R: 0, K: 0 };
+    let varkCount = 0;
+    
+    questions.forEach(q => {
+      if (q.type === 'vark' && q.varkMapping) {
+        const studentAnswer = answers[q.id];
+        const selectedIndex = (q.options || []).indexOf(studentAnswer);
+        if (selectedIndex !== -1) {
+          const mapping = q.varkMapping[selectedIndex];
+          if (mapping && varkSummary[mapping] !== undefined) {
+            varkSummary[mapping]++;
+            varkCount++;
+          }
+        }
+      }
+    });
+
+    const varkScores = {
+      visual: varkCount > 0 ? varkSummary.V / varkCount : 0.25,
+      auditory: varkCount > 0 ? varkSummary.A / varkCount : 0.25,
+      readWrite: varkCount > 0 ? varkSummary.R / varkCount : 0.25,
+      kinesthetic: varkCount > 0 ? varkSummary.K / varkCount : 0.25,
+    };
+    
+    evaluation.vark = varkScores;
+
+    console.log(`🧠 Evaluation | Acc: ${evaluation.accuracy_score} | VARK: V:${(varkScores.visual*100).toFixed(0)}% A:${(varkScores.auditory*100).toFixed(0)}% | ${completion.usage.total_tokens} tokens | ~$${estimatedCost.toFixed(4)}`);
     res.json({ success: true, evaluation, usage: { tokens: completion.usage.total_tokens, estimatedCost } });
 
   } catch (error) {
     console.error('❌ Evaluation error:', error.message);
+    
+    let varkSummary = { V: 0, A: 0, R: 0, K: 0 };
+    let varkCount = 0;
+    try {
+      (questions || []).forEach(q => {
+        if (q.type === 'vark' && q.varkMapping) {
+          const studentAnswer = (answers || {})[q.id];
+          const selectedIndex = (q.options || []).indexOf(studentAnswer);
+          if (selectedIndex !== -1) {
+            const mapping = q.varkMapping[selectedIndex];
+            if (mapping && varkSummary[mapping] !== undefined) {
+              varkSummary[mapping]++;
+              varkCount++;
+            }
+          }
+        }
+      });
+    } catch {}
+
+    const varkScores = {
+      visual: varkCount > 0 ? varkSummary.V / varkCount : 0.25,
+      auditory: varkCount > 0 ? varkSummary.A / varkCount : 0.25,
+      readWrite: varkCount > 0 ? varkSummary.R / varkCount : 0.25,
+      kinesthetic: varkCount > 0 ? varkSummary.K / varkCount : 0.25,
+    };
+
     res.json({
       success: true,
       evaluation: {
@@ -517,7 +588,8 @@ Return JSON format:
           reflection_depth: 0.3, self_awareness: 0.3,
           learning_orientation: 0.3, creativity_score: 0.3,
           insights: ['Analysis unavailable due to an error — default penalty applied'],
-        }
+        },
+        vark: varkScores
       },
       usage: { tokens: 0, estimatedCost: 0 },
     });
@@ -569,7 +641,8 @@ app.post('/api/records', async (req, res) => {
         decisionStyle: recordData.decisionStyle || 'unknown',
         cognitive: recordData.cognitive || {},
         overall: recordData.overall || {},
-        scenarioResults: recordData.scenarioResults || []
+        scenarioResults: recordData.scenarioResults || [],
+        vark: recordData.vark || null
       }
     });
 
