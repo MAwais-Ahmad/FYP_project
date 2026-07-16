@@ -1,0 +1,57 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  STUDENT
+  TEACHER
+  SUPERVISOR
+  ADMIN
+}
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  passwordHash String
+  name         String
+  role         Role         @default(STUDENT)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  records      Record[]
+}
+
+model Record {
+  id                  String   @id @default(uuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date                DateTime @default(now())
+  scenariosCompleted  Int
+
+  // Classification
+  primaryCategory     String
+  primaryName         String
+  primaryEmoji        String
+  primaryConfidence   Float
+  secondaryCategory   String?
+  secondaryName       String?
+
+  // Headline metrics
+  confidence          Float
+  performanceScore    Float
+  avgPerformanceScore Float
+  accuracyScore       Float
+  avgResponseTime     Float
+  decisionStyle       String
+
+  // Nested structures stored as JSONB
+  cognitive           Json     // CognitiveFeatures
+  overall             Json     // OverallMetrics
+  scenarioResults     Json     // ScenarioResult[]
+
+  createdAt           DateTime @default(now())
+}

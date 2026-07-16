@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { LearnerCategoryId } from '../../types/quiz.types';
 import { LEARNER_CATEGORIES } from '../../utils/classifyLearner';
 import { clearRecords, getRecords, StudentRecord } from '../../utils/storage';
+import { fetchRecords } from '../../services/api';
 
 interface TeacherDashboardProps {
     onBack: () => void;
@@ -22,6 +23,40 @@ export function TeacherDashboard({ onBack }: TeacherDashboardProps) {
         getRecords().sort((a, b) => b.date.localeCompare(a.date))
     );
     const [selected, setSelected] = useState<StudentRecord | null>(null);
+
+    useEffect(() => {
+        fetchRecords()
+            .then(data => {
+                if (data && Array.isArray(data)) {
+                    const mapped: StudentRecord[] = data.map(dbRec => ({
+                        id: dbRec.id,
+                        name: dbRec.user?.name || dbRec.name || 'Anonymous',
+                        date: dbRec.date,
+                        scenariosCompleted: dbRec.scenariosCompleted,
+                        primaryCategory: dbRec.primaryCategory,
+                        primaryName: dbRec.primaryName,
+                        primaryEmoji: dbRec.primaryEmoji,
+                        primaryConfidence: dbRec.primaryConfidence,
+                        secondaryCategory: dbRec.secondaryCategory,
+                        secondaryName: dbRec.secondaryName,
+                        confidence: dbRec.confidence,
+                        performanceScore: dbRec.performanceScore,
+                        avgPerformanceScore: dbRec.avgPerformanceScore,
+                        accuracyScore: dbRec.accuracyScore,
+                        avgResponseTime: dbRec.avgResponseTime,
+                        decisionStyle: dbRec.decisionStyle,
+                        cognitive: dbRec.cognitive,
+                        overall: dbRec.overall,
+                        scenarioResults: dbRec.scenarioResults,
+                    }));
+                    setRecords(mapped.sort((a, b) => b.date.localeCompare(a.date)));
+                }
+            })
+            .catch(err => {
+                console.warn("Could not load class records from database, using cached local data:", err.message);
+            });
+    }, []);
+
 
     const uniqueStudents = new Set(records.map(r => r.name.trim().toLowerCase())).size;
     const avg = (fn: (r: StudentRecord) => number) =>

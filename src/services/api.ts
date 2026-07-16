@@ -1,6 +1,9 @@
+/// <reference types="vite/client" />
 import { CognitiveFeatures, DifficultySignal, Question, Scenario } from '../types/quiz.types';
 
-const API_BASE = '/api';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '') || '/api';
+
+
 
 interface GenerateScenarioResponse {
     success: boolean;
@@ -47,12 +50,13 @@ interface EvaluateScenarioResponse {
 export async function evaluateScenario(
     scenario: any,
     questions: any[],
-    answers: any
+    answers: any,
+    studentName?: string
 ): Promise<EvaluateScenarioResponse> {
     const response = await fetch(`${API_BASE}/evaluate-scenario`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenario, questions, answers }),
+        body: JSON.stringify({ scenario, questions, answers, studentName }),
     });
 
     if (!response.ok) {
@@ -66,3 +70,32 @@ export async function healthCheck(): Promise<{ status: string; model: string }> 
     const response = await fetch(`${API_BASE}/health`);
     return response.json();
 }
+
+export async function saveRecord(record: any): Promise<{ success: boolean; id?: string }> {
+    const response = await fetch(`${API_BASE}/records`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record),
+    });
+    if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+    }
+    return response.json();
+}
+
+export async function fetchRecords(): Promise<any[]> {
+    const response = await fetch(`${API_BASE}/records`);
+    if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+    }
+    return response.json();
+}
+
+export async function fetchRecordsByName(name: string): Promise<any[]> {
+    const response = await fetch(`${API_BASE}/records/student/${encodeURIComponent(name)}`);
+    if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+    }
+    return response.json();
+}
+

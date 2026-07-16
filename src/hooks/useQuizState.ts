@@ -131,7 +131,8 @@ export function useQuizState() {
             const reflectionText = getReflectionText(answers, questions);
             try {
                 // Fetch GPT evaluation for accuracy and cognitive features
-                const evaluationData = await apiEvaluateScenario(scenario, questions, answers);
+                const evaluationData = await apiEvaluateScenario(scenario, questions, answers, studentName);
+
 
                 if (evaluationData.success) {
                     setTokensUsed(prev => prev + evaluationData.usage.tokens);

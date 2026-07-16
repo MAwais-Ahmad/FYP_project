@@ -7,6 +7,8 @@ import {
 } from '../../types/quiz.types';
 import { classifyLearner, LEARNER_CATEGORIES } from '../../utils/classifyLearner';
 import { addRecord, buildRecord } from '../../utils/storage';
+import { saveRecord } from '../../services/api';
+
 
 interface ResultsScreenProps {
     questions: Question[];
@@ -191,7 +193,11 @@ export function ResultsScreen({
 
             if (!savedRef.current) {
                 savedRef.current = true;
-                addRecord(buildRecord(studentName, result, scenarioResults, overall));
+                const record = buildRecord(studentName, result, scenarioResults, overall);
+                addRecord(record);
+                saveRecord(record).catch(err => {
+                    console.error("Database save failed. Record is preserved in local storage:", err.message);
+                });
             }
         }
     }, [scenarioResults]); // eslint-disable-line react-hooks/exhaustive-deps

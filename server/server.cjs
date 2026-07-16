@@ -2,16 +2,29 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
+const { PrismaClient } = require('@prisma/client');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MODEL = 'gpt-4o-mini';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const prisma = new PrismaClient();
+
+let isDbConnected = false;
+prisma.$connect()
+  .then(() => {
+    isDbConnected = true;
+    console.log('✅ PostgreSQL Database connected successfully via Prisma');
+  })
+  .catch((err) => {
+    console.error('⚠️ Database connection failed. Running in Offline/Local Fallback mode.', err.message);
+  });
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static('.'));
+
 
 let totalTokensUsed = 0;
 
@@ -82,6 +95,8 @@ const TEXT_TYPES = [
   { phaseName: 'Collaboration', type: 'text', desc: 'Write exactly what you would say to persuade, delegate, or manage a specific person in the story.', timeRange: '60s' },
   { phaseName: 'Reflection', type: 'reflection', desc: 'Hindsight, calibration and honest self-grading.', timeRange: '0 (unlimited)' }
 ];
+
+const COGNITIVE_PHASES = [...INTERACTIVE_TYPES, ...TEXT_TYPES];
 
 // Fixed, challenge-tuned per-question time limits (seconds) by question type.
 // The student never sees a per-question timer, but these still power the
@@ -509,7 +524,112 @@ Return JSON format:
   }
 });
 
+// ─── STUDENT RECORDS DATABASE ENDPOINTS ──────────────────────────────────────
+app.post('/api/records', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, error: 'Database is currently offline' });
+  }
+
+  try {
+    const recordData = req.body;
+    const name = recordData.name || 'Anonymous';
+    
+    // Auto-create/find user
+    let user = await prisma.user.findFirst({
+      where: { name: name }
+    });
+    
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          name: name,
+          email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@aita.edu`,
+          passwordHash: 'dummy_hash',
+          role: 'STUDENT'
+        }
+      });
+    }
+
+    // Save record linked to user
+    const savedRecord = await prisma.record.create({
+      data: {
+        userId: user.id,
+        scenariosCompleted: recordData.scenariosCompleted || 0,
+        primaryCategory: recordData.primaryCategory,
+        primaryName: recordData.primaryName,
+        primaryEmoji: recordData.primaryEmoji,
+        primaryConfidence: recordData.primaryConfidence || 0,
+        secondaryCategory: recordData.secondaryCategory || null,
+        secondaryName: recordData.secondaryName || null,
+        confidence: recordData.confidence || 0,
+        performanceScore: recordData.performanceScore || 0,
+        avgPerformanceScore: recordData.avgPerformanceScore || 0,
+        accuracyScore: recordData.accuracyScore || 0,
+        avgResponseTime: recordData.avgResponseTime || 0,
+        decisionStyle: recordData.decisionStyle || 'unknown',
+        cognitive: recordData.cognitive || {},
+        overall: recordData.overall || {},
+        scenarioResults: recordData.scenarioResults || []
+      }
+    });
+
+    res.json({ success: true, id: savedRecord.id });
+  } catch (error) {
+    console.error('❌ Failed to save record:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to save record', message: error.message });
+  }
+});
+
+app.get('/api/records', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, error: 'Database is currently offline' });
+  }
+
+  try {
+    const records = await prisma.record.findMany({
+      include: {
+        user: true
+      },
+      orderBy: {
+        date: 'desc'
+      }
+    });
+    res.json(records);
+  } catch (error) {
+    console.error('❌ Failed to fetch records:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch records' });
+  }
+});
+
+app.get('/api/records/student/:name', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, error: 'Database is currently offline' });
+  }
+
+  try {
+    const { name } = req.params;
+    const records = await prisma.record.findMany({
+      where: {
+        user: {
+          name: {
+            equals: name,
+            mode: 'insensitive'
+          }
+        }
+      },
+      orderBy: {
+        date: 'desc'
+      }
+    });
+    res.json(records);
+  } catch (error) {
+    console.error(`❌ Failed to fetch records for student ${req.params.name}:`, error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch records' });
+  }
+});
+
 // ─── HEALTH CHECK ────────────────────────────────────────────────────────────
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',

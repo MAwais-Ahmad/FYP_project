@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react';
 import { LEARNER_CATEGORIES } from '../../utils/classifyLearner';
-import { getRecordsByName } from '../../utils/storage';
+import { getRecordsByName, StudentRecord } from '../../utils/storage';
+import { fetchRecordsByName } from '../../services/api';
 
 interface StudentDashboardProps {
     studentName: string;
@@ -22,13 +24,51 @@ function fmtDate(iso: string): string {
 }
 
 export function StudentDashboard({ studentName, onBack, onStartNew }: StudentDashboardProps) {
+    const [records, setRecords] = useState<StudentRecord[]>(() =>
+        getRecordsByName(studentName).sort((a, b) => b.date.localeCompare(a.date))
+    );
+
+    useEffect(() => {
+        if (!studentName) return;
+        fetchRecordsByName(studentName)
+            .then(data => {
+                if (data && Array.isArray(data)) {
+                    const mapped: StudentRecord[] = data.map(dbRec => ({
+                        id: dbRec.id,
+                        name: dbRec.user?.name || dbRec.name || studentName,
+                        date: dbRec.date,
+                        scenariosCompleted: dbRec.scenariosCompleted,
+                        primaryCategory: dbRec.primaryCategory,
+                        primaryName: dbRec.primaryName,
+                        primaryEmoji: dbRec.primaryEmoji,
+                        primaryConfidence: dbRec.primaryConfidence,
+                        secondaryCategory: dbRec.secondaryCategory,
+                        secondaryName: dbRec.secondaryName,
+                        confidence: dbRec.confidence,
+                        performanceScore: dbRec.performanceScore,
+                        avgPerformanceScore: dbRec.avgPerformanceScore,
+                        accuracyScore: dbRec.accuracyScore,
+                        avgResponseTime: dbRec.avgResponseTime,
+                        decisionStyle: dbRec.decisionStyle,
+                        cognitive: dbRec.cognitive,
+                        overall: dbRec.overall,
+                        scenarioResults: dbRec.scenarioResults,
+                    }));
+                    setRecords(mapped.sort((a, b) => b.date.localeCompare(a.date)));
+                }
+            })
+            .catch(err => {
+                console.warn("Could not load student records from database, using cached local data:", err.message);
+            });
+    }, [studentName]);
+
     // Newest first
-    const records = getRecordsByName(studentName).sort((a, b) => b.date.localeCompare(a.date));
     const latest = records[0] ?? null;
     const primary = latest ? LEARNER_CATEGORIES[latest.primaryCategory] : null;
 
     // Attempts in chronological order for the curve
     const chrono = [...records].reverse();
+
 
     return (
         <section className="min-h-screen p-4 md:p-6 space-y-6 pb-16 max-w-5xl mx-auto">
