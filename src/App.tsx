@@ -1,16 +1,29 @@
+import { useState, useEffect } from 'react';
 import {
     WelcomeScreen,
+    AuthScreen,
+    UserDashboard,
+    SessionDashboard,
+    RecordDetail,
     QuizScreen,
     ResultsScreen,
     InterScenarioScreen,
-    StudentDashboard,
-    TeacherDashboard,
 } from './components';
 import { useQuizState, useMetrics } from './hooks';
+import { AuthUser, getMe, logout as apiLogout } from './services/api';
+import { StudentRecord } from './utils/storage';
 
 function App() {
+    // Auth state
+    const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+    const [authChecked, setAuthChecked] = useState(false);
+    const [selectedRecord, setSelectedRecord] = useState<StudentRecord | null>(null);
+    const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+    // Quiz state
     const {
         screen,
+        setScreen,
         isLoading,
         scenario,
         questions,
@@ -30,8 +43,6 @@ function App() {
         goToPreviousQuestion,
         goToQuestion,
         restartQuiz,
-        showStudentDashboard,
-        showTeacherDashboard,
         goToWelcome,
     } = useQuizState();
 
@@ -48,14 +59,86 @@ function App() {
         resetMetrics,
     } = useMetrics();
 
+    // Connection state
+    const [isOffline, setIsOffline] = useState(!navigator.onLine);
+    const [resetToken, setResetToken] = useState<string | null>(null);
+
+    // Track online/offline status
+    useEffect(() => {
+        const handleOnline = () => setIsOffline(false);
+        const handleOffline = () => setIsOffline(true);
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
+
+    // Check for existing auth & parse resetToken on mount
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('resetToken');
+        if (token) {
+            setResetToken(token);
+            setScreen('auth');
+            // Clean up the URL search params for security
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        getMe().then((result) => {
+            if (result.success && result.user) {
+                setCurrentUser(result.user);
+                // If there's no resetToken in the URL, proceed to user dashboard
+                if (!token) {
+                    setScreen('user-dashboard');
+                }
+            } else {
+                // If not logged in and no resetToken is present, force redirect to auth screen
+                if (!token) {
+                    setScreen('auth');
+                }
+            }
+            setAuthChecked(true);
+        });
+    }, []);
+
+    // Auth handlers
+    const handleAuthSuccess = (user: AuthUser) => {
+        setCurrentUser(user);
+        setScreen('user-dashboard');
+    };
+
+    const handleLogout = async () => {
+        await apiLogout();
+        setCurrentUser(null);
+        setActiveSessionId(null);
+        setSelectedRecord(null);
+        goToWelcome();
+    };
+
+
+
+    // Quiz handlers
     const handleStartQuiz = async (difficultyLevel: number, name: string) => {
         startMetrics();
         await startQuiz(difficultyLevel, name);
     };
 
+    const handleStartSoloTest = () => {
+        goToWelcome();
+    };
+
+    const handleStartSessionTest = (sessionId: string) => {
+        setActiveSessionId(sessionId);
+        goToWelcome();
+    };
+
     const handleCompleteScenario = () => {
         const overall = calculateOverallMetrics();
-        completeScenario(overall);
+        completeScenario(overall, questionsMetrics);
     };
 
     const handleProceedToNextScenario = async (newDifficulty: number) => {
@@ -66,12 +149,47 @@ function App() {
 
     const handleRestart = () => {
         resetMetrics();
-        restartQuiz();
+        setActiveSessionId(null);
+        if (currentUser) {
+            setScreen('user-dashboard');
+        } else {
+            restartQuiz();
+        }
+    };
+
+    const handleViewRecord = (record: StudentRecord) => {
+        setSelectedRecord(record);
+        setScreen('record-detail');
+    };
+
+    const handleViewSession = (sessionId: string) => {
+        setActiveSessionId(sessionId);
+        setScreen('session-dashboard');
+    };
+
+    const handleBackFromDetail = () => {
+        setSelectedRecord(null);
+        if (activeSessionId) {
+            setScreen('session-dashboard');
+        } else if (currentUser) {
+            setScreen('user-dashboard');
+        } else {
+            goToWelcome();
+        }
+    };
+
+    const handleBackFromSession = () => {
+        setActiveSessionId(null);
+        if (currentUser) {
+            setScreen('user-dashboard');
+        } else {
+            goToWelcome();
+        }
     };
 
     const handleAnswer = (questionId: number, answer: string | string[]) => {
         setAnswer(questionId, answer);
-        
+
         let textVal = '';
         if (Array.isArray(answer)) {
             textVal = answer.join('');
@@ -82,7 +200,7 @@ function App() {
                 textVal = answer;
             }
         }
-        
+
         recordFinalAnswer(questionId, answer, textVal.length);
     };
 
@@ -98,14 +216,85 @@ function App() {
         ])
     );
 
+    // Don't render until auth check is done
+    if (!authChecked) {
+        return (
+            <div className="app-container min-h-screen flex items-center justify-center">
+                <div className="text-center space-y-3">
+                    <div className="text-4xl animate-spin">🧠</div>
+                    <p className="text-white/50">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="app-container min-h-screen">
+            {/* Mid-Quiz Disconnect Warning Overlay */}
+            {isOffline && screen === 'quiz' && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6 animate-fadeIn">
+                    <div className="glass-card max-w-md w-full p-8 text-center space-y-4 border border-yellow-500/20 shadow-2xl">
+                        <div className="text-5xl animate-bounce">⚠️</div>
+                        <h2 className="text-2xl font-bold text-white">Network Signal Lost</h2>
+                        <p className="text-white/60 text-sm leading-relaxed">
+                            We cannot evaluate your cognitive features without a stable connection. Please reconnect to resume and ensure your final learning style classification remains accurate.
+                        </p>
+                        <div className="flex items-center justify-center gap-2 text-xs text-yellow-400 font-semibold uppercase tracking-wider bg-yellow-500/10 py-2 px-3 rounded-lg border border-yellow-500/15">
+                            <span className="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span>
+                            <span>Waiting for connection...</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Auth Screen */}
+            {screen === 'auth' && (
+                <AuthScreen
+                    onAuthSuccess={handleAuthSuccess}
+                    resetToken={resetToken}
+                    onResetComplete={() => setResetToken(null)}
+                />
+            )}
+
+            {/* User Dashboard (logged in) */}
+            {screen === 'user-dashboard' && currentUser && (
+                <UserDashboard
+                    user={currentUser}
+                    onStartSoloTest={handleStartSoloTest}
+                    onViewRecord={handleViewRecord}
+                    onViewSession={handleViewSession}
+                    onLogout={handleLogout}
+                />
+            )}
+
+            {/* Session Dashboard */}
+            {screen === 'session-dashboard' && currentUser && activeSessionId && (
+                <SessionDashboard
+                    sessionId={activeSessionId}
+                    user={currentUser}
+                    onBack={handleBackFromSession}
+                    onViewRecord={handleViewRecord}
+                    onStartSessionTest={handleStartSessionTest}
+                />
+            )}
+
+            {/* Record Detail */}
+            {screen === 'record-detail' && selectedRecord && (
+                <RecordDetail
+                    record={selectedRecord}
+                    onBack={handleBackFromDetail}
+                />
+            )}
+
+            {/* Welcome Screen (guest or starting a test) */}
             {screen === 'welcome' && (
                 <WelcomeScreen
                     onStart={handleStartQuiz}
-                    onViewTeacherDashboard={showTeacherDashboard}
-                    onViewStudentDashboard={showStudentDashboard}
+                    onViewAuth={() => setScreen('auth')}
+                    onViewDashboard={currentUser ? () => setScreen('user-dashboard') : undefined}
                     isLoading={isLoading}
+                    userName={currentUser?.name}
+                    isOffline={isOffline}
                 />
             )}
 
@@ -149,20 +338,12 @@ function App() {
                     tokensUsed={tokensUsed}
                     totalCost={totalCost}
                     onRestart={handleRestart}
-                    onViewDashboard={showStudentDashboard}
+                    onViewDashboard={
+                        currentUser
+                            ? () => setScreen('user-dashboard')
+                            : undefined
+                    }
                 />
-            )}
-
-            {screen === 'student-dashboard' && (
-                <StudentDashboard
-                    studentName={studentName}
-                    onBack={goToWelcome}
-                    onStartNew={handleRestart}
-                />
-            )}
-
-            {screen === 'teacher-dashboard' && (
-                <TeacherDashboard onBack={goToWelcome} />
             )}
         </div>
     );

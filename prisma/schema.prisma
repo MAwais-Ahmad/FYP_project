@@ -10,6 +10,7 @@ generator client {
 }
 
 enum Role {
+  USER
   STUDENT
   TEACHER
   SUPERVISOR
@@ -17,14 +18,44 @@ enum Role {
 }
 
 model User {
-  id           String       @id @default(uuid())
-  email        String       @unique
-  passwordHash String
-  name         String
-  role         Role         @default(STUDENT)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  records      Record[]
+  id                 String          @id @default(uuid())
+  email              String          @unique
+  passwordHash       String
+  name               String
+  role               Role            @default(USER)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  resetToken         String?         @unique
+  resetTokenExpires  DateTime?
+
+  records      Record[]        // Solo test results
+  sessions     Session[]       // Sessions this user hosts
+  memberships  SessionMember[] // Sessions this user joined
+}
+
+model Session {
+  id          String          @id @default(uuid())
+  code        String          @unique   // 6-char join code like "A3X7K2"
+  title       String                    // e.g. "CS301 Midterm Assessment"
+  hostId      String
+  host        User            @relation(fields: [hostId], references: [id])
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+
+  members     SessionMember[]
+}
+
+model SessionMember {
+  id          String   @id @default(uuid())
+  sessionId   String
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  joinedAt    DateTime @default(now())
+  recordId    String?  // Links to the Record created when they complete the assessment
+
+  @@unique([sessionId, userId])  // One membership per session
 }
 
 model Record {
@@ -54,6 +85,8 @@ model Record {
   cognitive           Json     // CognitiveFeatures
   overall             Json     // OverallMetrics
   scenarioResults     Json     // ScenarioResult[]
+  vark                Json?    // VARK scores: { visual: Float, auditory: Float, readWrite: Float, kinesthetic: Float }
 
   createdAt           DateTime @default(now())
+
 }

@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { ScenarioResult } from '../../types/quiz.types';
 
 interface InterScenarioScreenProps {
@@ -22,8 +21,7 @@ export function InterScenarioScreen({
     onContinue,
     onFinish,
 }: InterScenarioScreenProps) {
-    const [nextDifficulty, setNextDifficulty] = useState(scenarioResult?.difficultyLevel ?? 5);
-    const isMaxIterations = completedScenarioNumber >= 3;
+    const isMaxIterations = completedScenarioNumber >= 2;
 
     const perfScore = scenarioResult?.performanceScore ?? 0;
     const perfPercent = Math.round(perfScore * 100);
@@ -92,7 +90,7 @@ export function InterScenarioScreen({
                 {/* Max iterations reached */}
                 {isMaxIterations ? (
                     <div className="glass-card p-6 text-center space-y-4">
-                        <p className="text-lg">🎓 You've completed all 3 rounds!</p>
+                        <p className="text-lg">🎓 You've completed all 2 rounds!</p>
                         <p className="text-white/60 text-sm">Your full learner profile is ready.</p>
                         <button onClick={onFinish} className="btn-primary text-lg py-4 px-10">
                             <span>View My Results</span>
@@ -103,39 +101,13 @@ export function InterScenarioScreen({
                     </div>
                 ) : (
                     <>
-                        {/* Difficulty bar for next round */}
-                        <div className="glass-card p-6 space-y-4">
-                            <h3 className="font-semibold text-center">How hard did you find that round?</h3>
-                            <p className="text-white/50 text-sm text-center">
-                                Set the difficulty for your next round based on how you felt
-                            </p>
-                            <div className="space-y-3">
-                                <input
-                                    type="range"
-                                    min="1"
-                                    max="10"
-                                    value={nextDifficulty}
-                                    onChange={e => setNextDifficulty(parseInt(e.target.value))}
-                                    className="confidence-slider"
-                                />
-                                <div className="flex justify-between text-xs text-white/30">
-                                    {[1,2,3,4,5,6,7,8,9,10].map(n => (
-                                        <span key={n} className={nextDifficulty === n ? 'text-primary-400 font-bold' : ''}>{n}</span>
-                                    ))}
-                                </div>
-                                <p className="text-center text-white/60">
-                                    Next round difficulty: <strong className="text-white text-lg">{nextDifficulty}/10</strong>
-                                </p>
-                            </div>
-                        </div>
-
                         {/* Continue or Finish */}
                         <div className="flex gap-4 justify-center">
                             <button onClick={onFinish} className="btn-secondary py-4 px-8">
                                 <span>Finish & View Results</span>
                             </button>
                             <button
-                                onClick={() => onContinue(nextDifficulty)}
+                                onClick={() => onContinue(5)}
                                 disabled={isLoading}
                                 className="btn-primary py-4 px-8 disabled:opacity-50"
                             >

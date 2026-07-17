@@ -92,11 +92,13 @@ export interface Answers {
 
 export type ScreenType =
     | 'welcome'
+    | 'auth'
+    | 'user-dashboard'
     | 'quiz'
     | 'inter-scenario'
     | 'results'
-    | 'student-dashboard'
-    | 'teacher-dashboard';
+    | 'session-dashboard'
+    | 'record-detail';
 
 export type DifficultySignal = 'harder' | 'easier' | 'consistency_test';
 
@@ -131,6 +133,16 @@ export interface ScenarioResult {
     skippedQuestions: number;
     overtimeCount: number;
     answers: Answers;
+    questions?: Question[];
+    questionsMetrics?: Record<
+        number,
+        {
+            totalTimeSpent: number;
+            timeToFirstInteraction: number | null;
+            answerChanges: number;
+            responseLength: number;
+        }
+    >;
 }
 
 export interface CategoryResult {

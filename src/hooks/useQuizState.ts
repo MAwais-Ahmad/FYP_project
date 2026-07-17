@@ -119,14 +119,13 @@ export function useQuizState() {
         setScreen('quiz');
     }, [loadScenario]);
 
-    // ── DASHBOARD NAVIGATION (Improvement #6) ──────────────────────────────────
-    const showStudentDashboard = useCallback(() => setScreen('student-dashboard'), []);
-    const showTeacherDashboard = useCallback(() => setScreen('teacher-dashboard'), []);
+    // ── DASHBOARD NAVIGATION ──────────────────────────────────────────────────
     const goToWelcome = useCallback(() => setScreen('welcome'), []);
 
     // ── COMPLETE ITERATION (saves results, shows inter-scenario) ──────────────
     const completeScenario = useCallback(
-        async (overallMetrics: OverallMetrics) => {
+        async (overallMetrics: OverallMetrics, qMetrics?: any) => {
+            if (isLoading) return;
             setIsLoading(true);
             const reflectionText = getReflectionText(answers, questions);
             try {
@@ -144,7 +143,7 @@ export function useQuizState() {
                 // back to reliable client-side heuristics instead of flat 0.5s.
                 const cognitiveFeatures = evaluationData.success
                     ? evaluationData.evaluation.cognitive_features
-                    : heuristicCognitiveFeatures(answers, questions);
+                    : heuristicCognitiveFeatures(answers, questions, overallMetrics);
 
                 // Extract VARK score from evaluation
                 const varkScores = evaluationData.success && evaluationData.evaluation.vark
@@ -176,7 +175,6 @@ export function useQuizState() {
                 // Implicit, behaviour-driven confidence (no self-report slider)
                 const confidence = calculateDynamicConfidence(
                     overallMetrics,
-                    difficultyLevel,
                     accuracyScore,
                     reflectionText
                 );
@@ -204,6 +202,8 @@ export function useQuizState() {
                     skippedQuestions: overallMetrics.skippedQuestions,
                     overtimeCount: overallMetrics.overtimeCount,
                     answers: { ...answers },
+                    questions: [...questions],
+                    questionsMetrics: qMetrics ? { ...qMetrics } : undefined,
                 };
 
                 setScenarioResults(prev => [...prev, result]);
@@ -211,11 +211,10 @@ export function useQuizState() {
             } catch (error) {
                 console.error("Failed to evaluate scenario:", error);
                 // Fallback result if API fails — use client-side heuristics, not flat 0.5s
-                const cognitiveFeatures = heuristicCognitiveFeatures(answers, questions);
+                const cognitiveFeatures = heuristicCognitiveFeatures(answers, questions, overallMetrics);
                 const accuracyScore = 0.5;
                 const confidence = calculateDynamicConfidence(
                     overallMetrics,
-                    difficultyLevel,
                     accuracyScore,
                     reflectionText
                 );
@@ -264,6 +263,8 @@ export function useQuizState() {
                     skippedQuestions: overallMetrics.skippedQuestions,
                     overtimeCount: overallMetrics.overtimeCount,
                     answers: { ...answers },
+                    questions: [...questions],
+                    questionsMetrics: qMetrics ? { ...qMetrics } : undefined,
                 };
                 setScenarioResults(prev => [...prev, result]);
                 setScreen('inter-scenario');
@@ -271,7 +272,7 @@ export function useQuizState() {
                 setIsLoading(false);
             }
         },
-        [currentScenarioNumber, scenario, questions, difficultyLevel, answers]
+        [currentScenarioNumber, scenario, questions, difficultyLevel, answers, isLoading]
     );
 
     // ── CONTINUE TO NEXT ROUND (user chose new difficulty) ────────────────────
@@ -377,9 +378,8 @@ export function useQuizState() {
         goToPreviousQuestion,
         goToQuestion,
         restartQuiz,
-        showStudentDashboard,
-        showTeacherDashboard,
         goToWelcome,
+        setScreen,
         addCost,
     };
 }

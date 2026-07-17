@@ -258,49 +258,62 @@ export function detectSkippingBehavior(
         accuracyScore < 0.25 &&
         overall.avgResponseTime < 20 &&
         overall.questionsAnswered < 4;
-    const tooManySkips = overall.skippedQuestions >= 3;
+    const tooManySkips = overall.skippedQuestions >= 2;
     return rushedThrough || tooManySkips;
 }
 
-/**
- * Implicit confidence score (0–10) derived from behaviour instead of a
- * self-reported slider. Anti-gaming gatekeeper returns 0 for skippers.
- */
 export function calculateDynamicConfidence(
     overall: OverallMetrics,
-    chosenDifficulty: number,
     accuracyScore: number,
     reflectionText: string
 ): number {
     if (detectSkippingBehavior(overall, accuracyScore)) return 0;
 
-    let pts = 5; // base confidence
+    let pts = 6.0; // Higher baseline to prevent overly low confidence for valid attempts
 
-    // 1. Time penalty / bonus
-    if (overall.overtimeCount > 0) {
-        pts -= overall.overtimeCount * 0.75; // overestimated / went overtime
-    } else if (overall.rushedDecisions === 0) {
-        pts += 1.5; // deliberate and finished in time
+    // 1. Time pacing check
+    const avgTime = overall.avgResponseTime;
+    if (avgTime >= 30 && avgTime <= 80) {
+        pts += 1.0; // Balanced pace shows steady processing
+    } else if (avgTime < 20) {
+        pts -= 0.5; // Rushing shows impulsive behavior
+    } else if (avgTime > 90) {
+        pts -= 0.5; // Slow decision making indicates hesitation
     }
 
-    // 2. Difficulty multiplier — reward owning a harder round
-    if (chosenDifficulty >= 7) pts += 1.5;
-    else if (chosenDifficulty <= 3) pts -= 0.5;
+    // Overtime count penalty is more gradual
+    if (overall.overtimeCount > 0) {
+        pts -= Math.min(overall.overtimeCount * 0.3, 1.5);
+    } else if (overall.rushedDecisions === 0) {
+        pts += 1.0; // Finished within limits, no rushing
+    }
 
-    // 3. Hesitation adjustments
-    if (overall.backtrackCount > 3) pts -= 1.0;
-    if (overall.totalAnswerChanges > 4) pts -= 0.8;
+    // 2. Hesitation / Revisions (Gradual mapping)
+    if (overall.backtrackCount <= 1) {
+        pts += 0.5; // Straight path shows confidence
+    } else if (overall.backtrackCount > 3) {
+        pts -= 1.0;
+    }
 
-    // 4. Decision quality — good choices justify more confidence (±1)
-    pts += (accuracyScore - 0.5) * 2;
+    const changes = overall.totalAnswerChanges;
+    if (changes <= 4) {
+        pts += 0.5; // Healthy adjustments
+    } else if (changes > 8) {
+        pts -= 0.8; // High changes show guessing/doubt
+    }
 
-    // 5. Reflection engagement — a thoughtful reflection signals self-assurance
+    // 3. Correctness (Accuracy) plays a stronger positive role
+    pts += (accuracyScore - 0.5) * 4;
+
+    // 4. Written reflection length
     const words = reflectionText.trim().split(/\s+/).filter(Boolean).length;
-    if (words >= 25) pts += 1;
-    else if (words >= 8) pts += 0.5;
-    else if (words === 0) pts -= 1;
+    if (words >= 20) {
+        pts += 0.5;
+    } else if (words < 5) {
+        pts -= 0.5;
+    }
 
-    return Math.max(0, Math.min(10, Math.round(pts * 10) / 10));
+    return Math.max(1, Math.min(10, Math.round(pts * 10) / 10));
 }
 
 // ─── CLIENT-SIDE COGNITIVE HEURISTICS (Improvement #4 fallback) ───────────────
@@ -338,33 +351,95 @@ function keywordHits(text: string, keywords: string[]): number {
  */
 export function heuristicCognitiveFeatures(
     answers: Answers,
-    questions: Question[]
+    questions: Question[],
+    overallMetrics?: OverallMetrics
 ): CognitiveFeatures {
-    const { all, reflection } = collectAnswerText(answers, questions);
-    const words = all.split(/\s+/).filter(Boolean).length;
-    const uniqueWords = new Set(all.split(/\s+/).filter(Boolean)).size;
+    const { reflection } = collectAnswerText(answers, questions);
+
+    // Extract text written in reflection or text input questions
+    const textQuestions = questions.filter(q => q.type === 'reflection' || q.type === 'text' || q.type === 'multi-text');
+    let writtenText = '';
+    textQuestions.forEach(q => {
+        const a = answers[q.id];
+        if (typeof a === 'string') {
+            writtenText += ' ' + (a.includes('|') ? a.split('|').slice(1).join(' ') : a);
+        } else if (Array.isArray(a)) {
+            writtenText += ' ' + a.join(' ');
+        }
+    });
+    writtenText = writtenText.toLowerCase().trim();
+
+    const words = writtenText.split(/\s+/).filter(Boolean).length;
+    const uniqueWords = new Set(writtenText.split(/\s+/).filter(Boolean)).size;
     const lexicalDiversity = words > 0 ? uniqueWords / words : 0;
 
-    // Reflection depth: length + causal reasoning
-    const lengthScore = clamp01(words / 120); // ~120 words => full marks
-    const causalScore = clamp01(keywordHits(all, CAUSAL_KEYWORDS) / 4);
-    const reflection_depth = clamp01(lengthScore * 0.6 + causalScore * 0.4);
+    // 1. Reflection Depth (Base on reflection length + causal reasoning)
+    const lengthScore = clamp01(words / 45); // 45+ words of written text is a solid reflection for a scenario
+    const causalScore = clamp01(keywordHits(writtenText, CAUSAL_KEYWORDS) / 2);
+    let reflection_depth = lengthScore * 0.6 + causalScore * 0.4;
 
-    // Self-awareness: self-critical phrasing in the reflection
-    const self_awareness = clamp01(keywordHits(reflection || all, SELF_AWARE_KEYWORDS) / 3);
+    // Adjust reflection depth with behavioral indicators if available
+    if (overallMetrics) {
+        // Average response time: taking time (45s - 90s) increases reflection depth
+        const avgTime = overallMetrics.avgResponseTime;
+        if (avgTime >= 45 && avgTime <= 90) reflection_depth += 0.15;
+        else if (avgTime < 25) reflection_depth -= 0.15; // Rushing shows shallow reflection
+        
+        // Backtracking shows review and deeper processing
+        if (overallMetrics.backtrackCount > 1) reflection_depth += 0.1;
+    }
+    reflection_depth = clamp01(reflection_depth);
 
-    // Learning orientation: desire to improve
-    const learning_orientation = clamp01(keywordHits(all, LEARNING_KEYWORDS) / 3 * 0.7 + (reflection ? 0.3 : 0));
+    // 2. Self-Awareness (Base on self-critical keywords in reflection + backtracking)
+    const selfAwareHits = keywordHits(reflection, SELF_AWARE_KEYWORDS);
+    let self_awareness = clamp01(selfAwareHits / 2);
 
-    // Creativity: lexical richness + answer volume as a rough proxy
-    const creativity_score = clamp01(lexicalDiversity * 0.6 + clamp01(words / 150) * 0.4);
+    if (overallMetrics) {
+        // Changing answers indicates self-correction
+        const changes = overallMetrics.totalAnswerChanges;
+        if (changes >= 2 && changes <= 5) self_awareness += 0.2;
+        else if (changes > 6) self_awareness += 0.1; // Too many might be guessing
+        
+        if (overallMetrics.backtrackCount > 0) self_awareness += 0.1;
+        if (overallMetrics.rushedDecisions > 2) self_awareness -= 0.1; // Careless rushing indicates lower self-awareness
+    }
+    self_awareness = clamp01(self_awareness);
+
+    // 3. Learning Orientation (Base on learning keywords + steady performance)
+    const learningHits = keywordHits(writtenText, LEARNING_KEYWORDS);
+    let learning_orientation = clamp01(learningHits / 2);
+
+    if (overallMetrics) {
+        if (overallMetrics.skippedQuestions === 0) learning_orientation += 0.2; // Completed all questions
+        if (overallMetrics.overtimeCount <= 1) learning_orientation += 0.1; // Respects limits
+        if (overallMetrics.rushedDecisions === 0) learning_orientation += 0.1; // Didn't rush through
+    }
+    learning_orientation = clamp01(learning_orientation);
+
+    // 4. Creativity (Base on lexical diversity + original choices)
+    let creativity_score = lexicalDiversity * 0.5 + clamp01(words / 60) * 0.3;
+    if (overallMetrics) {
+        // Moderate revisions (exploring alternatives) is associated with creative problem solving
+        const changes = overallMetrics.totalAnswerChanges;
+        if (changes >= 1 && changes <= 4) creativity_score += 0.2;
+    }
+    creativity_score = clamp01(creativity_score);
+
+    // Fallbacks if no text is written at all (make sure we don't return pure zeroes if they answered the MCQs well)
+    if (words === 0 && overallMetrics) {
+        const hasGoodAccuracy = overallMetrics.skippedQuestions === 0;
+        reflection_depth = hasGoodAccuracy ? 0.4 : 0.25;
+        self_awareness = overallMetrics.totalAnswerChanges > 0 ? 0.45 : 0.3;
+        learning_orientation = overallMetrics.skippedQuestions === 0 ? 0.5 : 0.3;
+        creativity_score = overallMetrics.totalAnswerChanges > 1 ? 0.5 : 0.35;
+    }
 
     return {
         reflection_depth: Math.round(reflection_depth * 100) / 100,
         self_awareness: Math.round(self_awareness * 100) / 100,
         learning_orientation: Math.round(learning_orientation * 100) / 100,
         creativity_score: Math.round(creativity_score * 100) / 100,
-        insights: ['Cognitive features estimated locally from your written answers (AI evaluation unavailable).'],
+        insights: ['Cognitive features estimated locally from your choices and reflection (AI evaluation offline).'],
     };
 }
 
@@ -415,22 +490,21 @@ function scoreCategory(id: LearnerCategoryId, input: ClassificationInput): numbe
 
         case 'quick_careless': {
             let s = 0;
-            // They are careless, but not completely ignorant (which is caught above)
             if (isSkippingBehavior) return 0;
 
             if (avgTime < 25) s += 0.3;
             else if (avgTime < 35) s += 0.2;
-            else if (avgTime < 45) s += 0.1;
+            else if (avgTime < 55) s += 0.1; // Widen to < 55s
             
-            if (overall.avgTimeToStart < 2) s += 0.15; // Started clicking instantly
+            if (overall.avgTimeToStart < 3) s += 0.15; // Widen to < 3s
             if (overall.decisionStyle === 'impulsive') s += 0.1;
 
-            if (confidence < 6) s += 0.1;
-            if (accuracyScore < 0.5) s += 0.2;
-            if (answerChanges < 2) s += 0.1;
-            if (skipped >= 2) s += 0.15; // Skipped questions = careless
-            if (cognitive.reflection_depth < 0.45) s += 0.1;
-            if (overall.rushedDecisions > 2) s += 0.1;
+            if (confidence < 7) s += 0.1; // Widen to < 7
+            if (accuracyScore < 0.6) s += 0.2; // Widen to < 0.6
+            if (answerChanges < 3) s += 0.1;
+            if (skipped >= 1) s += 0.15; 
+            if (cognitive.reflection_depth < 0.55) s += 0.1;
+            if (overall.rushedDecisions > 1) s += 0.1;
             return Math.min(s, 1);
         }
 
@@ -439,32 +513,36 @@ function scoreCategory(id: LearnerCategoryId, input: ClassificationInput): numbe
             let s = 0;
             if (avgTime > 100) s += 0.3;
             else if (avgTime > 80) s += 0.2;
-            else if (avgTime > 65) s += 0.1;
+            else if (avgTime > 55) s += 0.1; // Widen to > 55s
+            else if (avgTime > 40) s += 0.05;
 
-            if (overall.avgTimeToStart > 8) s += 0.1; // Read carefully first
+            if (overall.avgTimeToStart > 6) s += 0.1; // Widen to > 6s
             if (overall.decisionStyle === 'deliberate') s += 0.1;
 
-            if (confidence >= 7) s += 0.15;
-            if (answerChanges >= 4) s += 0.15;
-            else if (answerChanges >= 2) s += 0.1;
-            if (cognitive.reflection_depth > 0.65) s += 0.15;
-            if (overall.overthinkingCount > 1) s += 0.1;
-            if (overtime >= 2) s += 0.1; // Going overtime = thorough
-            if (skipped === 0) s += 0.05; // Answered everything
+            if (confidence >= 5) s += 0.15; // Widen to >= 5
+            if (answerChanges >= 3) s += 0.15; // Widen to >= 3
+            else if (answerChanges >= 1) s += 0.1;
+            if (cognitive.reflection_depth > 0.5) s += 0.15; // Widen to > 0.5
+            if (overall.overthinkingCount >= 1) s += 0.1;
+            if (overtime >= 1) s += 0.1;
+            if (skipped === 0) s += 0.05;
             return Math.min(s, 1);
         }
 
         case 'concept_struggler': {
             if (isSkippingBehavior) return 0;
+            if (accuracyScore <= 0.25 && cognitive.reflection_depth <= 0.25) {
+                return 0.1; 
+            }
             let s = 0;
             if (avgTime > 90) s += 0.15;
             if (accuracyScore < 0.4) s += 0.35;
-            if (confidence < 5) s += 0.25;
-            else if (confidence < 6) s += 0.15;
+            if (confidence < 4) s += 0.25; // Widen to < 4 (only struggling if very low confidence)
+            else if (confidence < 5) s += 0.15;
             if (improvementRate < 0.05) s += 0.2;
-            if (cognitive.learning_orientation < 0.4) s += 0.15;
-            if (skipped >= 2) s += 0.1; // Skipping = struggling
-            if (overtime >= 3) s += 0.1; // Went overtime on many questions
+            if (cognitive.learning_orientation < 0.35) s += 0.15;
+            if (skipped >= 2) s += 0.1;
+            if (overtime >= 3) s += 0.1;
             if (backtrack > 3 && answerChanges > 3) s += 0.05;
             return Math.min(s, 1);
         }
@@ -472,66 +550,66 @@ function scoreCategory(id: LearnerCategoryId, input: ClassificationInput): numbe
         case 'fast_learner': {
             if (isSkippingBehavior) return 0;
             let s = 0;
-            if (avgTime < 35) s += 0.2;
-            else if (avgTime < 45) s += 0.1;
+            if (avgTime < 45) s += 0.2; // Widen to < 45s
+            else if (avgTime < 55) s += 0.1;
 
             if (accuracyScore > 0.7) s += 0.25;
-            if (overall.totalResponseLength > 30) s += 0.1; // Actually typed answers
+            else if (accuracyScore > 0.5) s += 0.15; // Added gradual band
+            if (overall.totalResponseLength > 10) s += 0.1; // Widen from 30 to 10 characters
             
-            if (confidence >= 9) s += 0.15;
-            else if (confidence >= 8) s += 0.1;
+            if (confidence >= 8) s += 0.15; // Widen to >= 8
+            else if (confidence >= 5) s += 0.1; // Widen to >= 5
 
-            if (overall.timeTrend === 'speeding_up') s += 0.15;
-            if (improvementRate > 0.2) s += 0.2;
-            else if (improvementRate > 0.1) s += 0.1;
-            if (skipped === 0) s += 0.05; // Answered everything
-            if (overtime === 0) s += 0.05; // Never went overtime
+            if (overall.timeTrend === 'speeding_up' || overall.timeTrend === 'stable') s += 0.15; // Widen timeTrend
+            if (improvementRate > 0.15) s += 0.2; // Widen from 0.2 to 0.15
+            else if (improvementRate > 0.05) s += 0.1;
+            if (skipped === 0) s += 0.05;
+            if (overtime <= 1) s += 0.05; // Widen to <= 1
             return Math.min(s, 1);
         }
 
         case 'inconsistent_performer': {
             if (isSkippingBehavior) return 0;
             let s = 0;
-            if (variance > 0.65) s += 0.45;
-            else if (variance > 0.45) s += 0.25;
-            else if (variance > 0.3) s += 0.1;
-            if (backtrack > 4) s += 0.2;
-            else if (backtrack > 2) s += 0.1;
-            if (answerChanges > 6) s += 0.2;
-            else if (answerChanges > 4) s += 0.1;
-            if (overall.rushedDecisions > 2 && overall.overthinkingCount > 1) s += 0.1;
-            if (skipped >= 1 && overtime >= 1) s += 0.1; // Mix of skipping AND overtime = inconsistent
+            if (variance > 0.5) s += 0.45; // Widen to > 0.5
+            else if (variance > 0.3) s += 0.25;
+            if (backtrack > 3) s += 0.2; // Widen to > 3
+            else if (backtrack > 1) s += 0.1;
+            if (answerChanges > 5) s += 0.2; // Widen to > 5
+            else if (answerChanges > 3) s += 0.1;
+            if (overall.rushedDecisions >= 2 && overall.overthinkingCount >= 1) s += 0.1;
+            if (skipped >= 1 && overtime >= 1) s += 0.1;
             return Math.min(s, 1);
         }
 
         case 'steady_achiever': {
             if (isSkippingBehavior) return 0;
             let s = 0;
-            if (variance < 0.25) s += 0.35;
-            else if (variance < 0.35) s += 0.2;
-            if (confidence >= 6 && confidence <= 8) s += 0.2;
-            if (overall.timeTrend === 'stable') s += 0.25;
-            if (avgTime >= 45 && avgTime <= 80) s += 0.15;
-            if (skipped === 0) s += 0.05; // Answered everything
-            if (overtime <= 1) s += 0.05; // Mostly within time
+            if (variance < 0.45) s += 0.35; // Widen to < 0.45
+            else if (variance < 0.6) s += 0.2;
+            if (confidence >= 4 && confidence <= 8) s += 0.2; // Widen to 4-8
+            if (overall.timeTrend === 'stable' || overall.timeTrend === 'speeding_up') s += 0.25; // Widen timeTrend
+            if (avgTime >= 25 && avgTime <= 90) s += 0.15; // Widen to 25-90s
+            if (skipped === 0) s += 0.05;
+            if (overtime <= 3) s += 0.05; // Widen from <=1 to <=3
             return Math.min(s, 1);
         }
 
         case 'strategic_thinker': {
             if (isSkippingBehavior) return 0;
             let s = 0;
-            if (cognitive.creativity_score > 0.75) s += 0.25;
-            else if (cognitive.creativity_score > 0.6) s += 0.15;
+            if (cognitive.creativity_score > 0.6) s += 0.25;
+            else if (cognitive.creativity_score > 0.45) s += 0.15; // Widen to > 0.45
             
-            if (cognitive.reflection_depth > 0.75) s += 0.25;
-            else if (cognitive.reflection_depth > 0.6) s += 0.15;
+            if (cognitive.reflection_depth > 0.6) s += 0.25;
+            else if (cognitive.reflection_depth > 0.45) s += 0.15; // Widen to > 0.45
             
-            if (overall.totalResponseLength > 50) s += 0.1; // Very thorough answers
-            if (overall.decisionStyle === 'deliberate') s += 0.1;
+            if (overall.totalResponseLength > 20) s += 0.1; // Widen to > 20
+            if (overall.decisionStyle === 'deliberate' || overall.decisionStyle === 'balanced') s += 0.1; // Widen decisionStyle
 
-            if (avgTime >= 40 && avgTime <= 90) s += 0.15;
-            if (cognitive.self_awareness > 0.7) s += 0.2;
-            else if (cognitive.self_awareness > 0.55) s += 0.1;
+            if (avgTime >= 25 && avgTime <= 95) s += 0.15; // Widen to 25-95s
+            if (cognitive.self_awareness > 0.6) s += 0.2;
+            else if (cognitive.self_awareness > 0.45) s += 0.1; // Widen to > 0.45
             return Math.min(s, 1);
         }
 

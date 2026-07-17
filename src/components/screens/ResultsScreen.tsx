@@ -92,54 +92,7 @@ function RadarChart({ axes }: { axes: { label: string; value: number }[] }) {
     );
 }
 
-// ─── LEARNING CURVE ─────────────────────────────────────────────────────────────
 
-function ScenarioProgressCard({ results }: { results: ScenarioResult[] }) {
-    if (results.length === 0) return null;
-    return (
-        <div className="glass-card p-6 space-y-4">
-            <h2 className="text-lg font-semibold flex items-center gap-2">📈 Learning Curve</h2>
-            <div className="flex items-end gap-4">
-                {results.map((r, i) => {
-                    const pct = Math.round(r.performanceScore * 100);
-                    return (
-                        <div key={i} className="flex-1 space-y-2 text-center">
-                            <div className="text-sm font-medium text-white/60">S{r.scenarioNumber}</div>
-                            <div className="relative h-24 bg-white/5 rounded-xl overflow-hidden flex items-end">
-                                <div
-                                    className="w-full bg-gradient-to-t from-primary-500 to-accent-500 transition-all duration-700"
-                                    style={{ height: `${Math.max(pct, 8)}%` }}
-                                />
-                            </div>
-                            <div className="text-sm font-bold">{pct}%</div>
-                            <div className="text-xs text-white/40">Lvl {r.difficultyLevel} · {r.decisionStyle}</div>
-                        </div>
-                    );
-                })}
-                {results.length > 1 && (
-                    <div className="flex-1 flex flex-col items-center justify-center gap-1 pb-8">
-                        {results[results.length - 1].performanceScore > results[0].performanceScore ? (
-                            <>
-                                <span className="text-2xl">📈</span>
-                                <span className="text-xs text-emerald-400 font-medium">Improving</span>
-                            </>
-                        ) : results[results.length - 1].performanceScore < results[0].performanceScore - 0.05 ? (
-                            <>
-                                <span className="text-2xl">📉</span>
-                                <span className="text-xs text-rose-400 font-medium">Declining</span>
-                            </>
-                        ) : (
-                            <>
-                                <span className="text-2xl">➡️</span>
-                                <span className="text-xs text-blue-400 font-medium">Stable</span>
-                            </>
-                        )}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
 
 // ─── STAT CARD ──────────────────────────────────────────────────────────────────
 
@@ -161,9 +114,9 @@ function StatCard({ icon, value, label, sub }: { icon: string; value: string; la
 // ─── MAIN COMPONENT ────────────────────────────────────────────────────────────
 
 export function ResultsScreen({
-    questions,
+    questions: _questions,
     calculateMetrics,
-    questionsMetrics,
+    questionsMetrics: _questionsMetrics,
     scenarioResults,
     studentName,
     tokensUsed,
@@ -427,8 +380,7 @@ export function ResultsScreen({
                 </div>
             )}
 
-            {/* ── LEARNING CURVE ──────────────────────────────────────────────── */}
-            <ScenarioProgressCard results={scenarioResults} />
+
 
             {/* ── ML FEATURE VECTOR ───────────────────────────────────────────── */}
             <div className="glass-card p-6 space-y-4">
@@ -500,40 +452,53 @@ export function ResultsScreen({
                 </div>
             </div>
 
-            {/* ── PER-QUESTION TABLE ───────────────────────────────────────────── */}
-            <div className="glass-card p-6 overflow-x-auto space-y-3">
-                <h2 className="text-lg font-semibold">📋 Per-Question Metrics</h2>
-                <table className="w-full text-sm">
-                    <thead>
-                        <tr className="text-white/50 text-left">
-                            <th className="p-2">Q</th>
-                            <th className="p-2">Phase</th>
-                            <th className="p-2">Time Spent</th>
-                            <th className="p-2">Time to Start</th>
-                            <th className="p-2">Revisions</th>
-                            <th className="p-2">Response Length</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {questions.map(q => {
-                            const m = questionsMetrics[q.id] || ({} as (typeof questionsMetrics)[number]);
-                            return (
-                                <tr key={q.id} className="border-t border-white/10 hover:bg-white/5">
-                                    <td className="p-2 font-medium">Q{q.id}</td>
-                                    <td className="p-2">
-                                        <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs">{q.phaseName}</span>
-                                    </td>
-                                    <td className="p-2">{m.totalTimeSpent ? formatDuration(m.totalTimeSpent) : '–'}</td>
-                                    <td className="p-2">
-                                        {m.timeToFirstInteraction ? `${m.timeToFirstInteraction.toFixed(1)}s` : '–'}
-                                    </td>
-                                    <td className="p-2">{m.answerChanges || 0}</td>
-                                    <td className="p-2">{m.responseLength ? `${m.responseLength} chars` : '–'}</td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
+            {/* ── PER-QUESTION TABLES (Split per round) ───────────────────────── */}
+            <div className="space-y-6">
+                {scenarioResults.map((result, idx) => {
+                    const roundQuestions = result.questions || [];
+                    const qMetrics = result.questionsMetrics || {};
+                    if (roundQuestions.length === 0) return null;
+                    return (
+                        <div key={idx} className="glass-card p-6 overflow-x-auto space-y-3">
+                            <div className="flex justify-between items-center flex-wrap gap-2">
+                                <h2 className="text-lg font-semibold flex items-center gap-2">
+                                    📋 Round {result.scenarioNumber}: {result.scenarioTitle}
+                                </h2>
+                            </div>
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="text-white/50 text-left">
+                                        <th className="p-2">Q</th>
+                                        <th className="p-2">Phase</th>
+                                        <th className="p-2">Time Spent</th>
+                                        <th className="p-2">Time to Start</th>
+                                        <th className="p-2">Revisions</th>
+                                        <th className="p-2">Response Length</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {roundQuestions.map(q => {
+                                        const m = qMetrics[q.id] || {};
+                                        return (
+                                            <tr key={q.id} className="border-t border-white/10 hover:bg-white/5">
+                                                <td className="p-2 font-medium">Q{q.id}</td>
+                                                <td className="p-2">
+                                                    <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs">{q.phaseName}</span>
+                                                </td>
+                                                <td className="p-2">{m.totalTimeSpent ? formatDuration(m.totalTimeSpent) : '–'}</td>
+                                                <td className="p-2">
+                                                    {m.timeToFirstInteraction ? `${m.timeToFirstInteraction.toFixed(1)}s` : '–'}
+                                                </td>
+                                                <td className="p-2">{m.answerChanges || 0}</td>
+                                                <td className="p-2">{m.responseLength ? `${m.responseLength} chars` : '–'}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                })}
             </div>
 
             {/* ── FOOTER ──────────────────────────────────────────────────────── */}

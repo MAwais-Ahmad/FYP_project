@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const OpenAI = require('openai');
 const { PrismaClient } = require('@prisma/client');
 
@@ -25,8 +27,459 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('.'));
 
-
 let totalTokensUsed = 0;
+
+// ─── AUTH HELPERS ────────────────────────────────────────────────────────────
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  const [salt, hash] = stored.split(':');
+  const computed = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+  return hash === computed;
+}
+
+function generateToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function generateSessionCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No confusing I/1/O/0
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
+// In-memory token store (keyed by token → userId)
+const tokenStore = new Map();
+
+// Auth middleware — attaches req.user if valid token present, else null
+async function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    req.user = null;
+    return next();
+  }
+  const token = authHeader.slice(7);
+  const userId = tokenStore.get(token);
+  if (!userId) {
+    req.user = null;
+    return next();
+  }
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    req.user = user;
+  } catch {
+    req.user = null;
+  }
+  next();
+}
+
+// Require auth — returns 401 if not logged in
+function requireAuth(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  next();
+}
+
+app.use(authMiddleware);
+
+// ─── AUTH ENDPOINTS ──────────────────────────────────────────────────────────
+app.post('/api/auth/register', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, error: 'Database is currently offline' });
+  }
+  try {
+    const { email, password, name } = req.body;
+    if (!email || !password || !name) {
+      return res.status(400).json({ success: false, error: 'Email, password, and name are required' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
+    }
+    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (existing) {
+      return res.status(409).json({ success: false, error: 'An account with this email already exists' });
+    }
+    const user = await prisma.user.create({
+      data: {
+        email: email.toLowerCase(),
+        passwordHash: hashPassword(password),
+        name: name.trim(),
+        role: 'USER'
+      }
+    });
+    const token = generateToken();
+    tokenStore.set(token, user.id);
+    console.log(`✅ User registered: ${user.email}`);
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, email: user.email, name: user.name, role: user.role }
+    });
+  } catch (error) {
+    console.error('❌ Registration error:', error.message);
+    res.status(500).json({ success: false, error: 'Registration failed', message: error.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, error: 'Database is currently offline' });
+  }
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: 'Email and password are required' });
+    }
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      return res.status(401).json({ success: false, error: 'Invalid email or password' });
+    }
+    const token = generateToken();
+    tokenStore.set(token, user.id);
+    console.log(`✅ User logged in: ${user.email}`);
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, email: user.email, name: user.name, role: user.role }
+    });
+  } catch (error) {
+    console.error('❌ Login error:', error.message);
+    res.status(500).json({ success: false, error: 'Login failed', message: error.message });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    tokenStore.delete(authHeader.slice(7));
+  }
+  res.json({ success: true });
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({
+    success: true,
+    user: { id: req.user.id, email: req.user.email, name: req.user.name, role: req.user.role }
+  });
+});
+
+// ─── EMAIL TRANSPORTER SETUP ────────────────────────────────────────────────
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.ethereal.email',
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER || 'mock_user',
+    pass: process.env.SMTP_PASS || 'mock_pass',
+  },
+});
+
+async function sendResetPasswordEmail(email, token) {
+  const resetLink = `http://localhost:5173/?resetToken=${token}`;
+  console.log(`\n🔑 [PASSWORD RESET LINK GENERATED FOR ${email}]:\n👉 ${resetLink}\n`);
+
+  if (process.env.SMTP_USER && process.env.SMTP_HOST && process.env.SMTP_USER !== 'mock_user') {
+    try {
+      await transporter.sendMail({
+        from: `"AITA Support" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+        to: email,
+        subject: 'Reset Your AITA Password',
+        text: `You requested to reset your password. Click the link below to set a new password:\n\n${resetLink}\n\nThis link is valid for 1 hour.`,
+        html: `<div style="font-family: sans-serif; padding: 20px; color: #333; max-width: 500px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #0b0f19; color: #ffffff;">
+          <h2 style="color: #6366f1; text-align: center;">AITA Password Reset</h2>
+          <p>You requested to reset your password. Click the button below to set a new password:</p>
+          <div style="text-align: center; margin: 25px 0;">
+            <a href="${resetLink}" style="background-color: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Reset Password</a>
+          </div>
+          <p style="color: #9ca3af; font-size: 14px;">Or copy and paste this link into your browser:</p>
+          <p style="word-break: break-all; color: #818cf8;"><a href="${resetLink}" style="color: #818cf8;">${resetLink}</a></p>
+          <hr style="border: 0; border-top: 1px solid #1f2937; margin: 20px 0;" />
+          <p style="font-size: 12px; color: #9ca3af; text-align: center;">This link will expire in 1 hour. If you didn't request a password reset, you can safely ignore this email.</p>
+        </div>`,
+      });
+      console.log(`🟢 Reset email sent successfully to ${email}`);
+    } catch (err) {
+      console.error(`🔴 Failed to send reset email to ${email}:`, err.message);
+    }
+  } else {
+    console.log(`ℹ️ SMTP not configured. Reset link printed to console above.`);
+  }
+}
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, error: 'Database is currently offline' });
+  }
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email is required' });
+    }
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (!user) {
+      // Prevents email enumeration
+      return res.json({ success: true, message: 'If the email exists, a reset link has been sent' });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 3600000); // 1 hour expiry
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken: token,
+        resetTokenExpires: expires
+      }
+    });
+
+    await sendResetPasswordEmail(user.email, token);
+
+    res.json({ success: true, message: 'If the email exists, a reset link has been sent' });
+  } catch (error) {
+    console.error('❌ Forgot password error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to request password reset' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, error: 'Database is currently offline' });
+  }
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) {
+      return res.status(400).json({ success: false, error: 'Token and new password are required' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
+    }
+    const user = await prisma.user.findFirst({
+      where: {
+        resetToken: token,
+        resetTokenExpires: {
+          gt: new Date()
+        }
+      }
+    });
+    if (!user) {
+      return res.status(400).json({ success: false, error: 'Invalid or expired password reset token' });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: hashPassword(password),
+        resetToken: null,
+        resetTokenExpires: null
+      }
+    });
+
+    console.log(`🔒 Password reset successfully for user: ${user.email}`);
+    res.json({ success: true, message: 'Password has been reset successfully' });
+  } catch (error) {
+    console.error('❌ Reset password error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to reset password' });
+  }
+});
+
+// ─── SESSION ENDPOINTS ───────────────────────────────────────────────────────
+app.post('/api/sessions', requireAuth, async (req, res) => {
+  try {
+    const { title } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ success: false, error: 'Session title is required' });
+    }
+    // Generate unique 6-char code (retry if collision)
+    let code;
+    let attempts = 0;
+    do {
+      code = generateSessionCode();
+      attempts++;
+    } while (await prisma.session.findUnique({ where: { code } }) && attempts < 10);
+
+    const session = await prisma.session.create({
+      data: {
+        code,
+        title: title.trim(),
+        hostId: req.user.id,
+      }
+    });
+    console.log(`📋 Session created: ${session.code} — "${session.title}" by ${req.user.name}`);
+    res.json({ success: true, session });
+  } catch (error) {
+    console.error('❌ Session creation error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to create session' });
+  }
+});
+
+app.get('/api/sessions', requireAuth, async (req, res) => {
+  try {
+    // Get sessions the user hosts
+    const hosted = await prisma.session.findMany({
+      where: { hostId: req.user.id },
+      include: { members: { include: { user: { select: { id: true, name: true, email: true } } } } },
+      orderBy: { createdAt: 'desc' }
+    });
+    // Get sessions the user joined
+    const joined = await prisma.sessionMember.findMany({
+      where: { userId: req.user.id },
+      include: {
+        session: {
+          include: {
+            host: { select: { id: true, name: true } },
+            members: { include: { user: { select: { id: true, name: true } } } }
+          }
+        }
+      },
+      orderBy: { joinedAt: 'desc' }
+    });
+    res.json({
+      success: true,
+      hosted,
+      joined: joined.map(m => ({ ...m.session, myMembership: { id: m.id, recordId: m.recordId, joinedAt: m.joinedAt } }))
+    });
+  } catch (error) {
+    console.error('❌ Sessions list error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch sessions' });
+  }
+});
+
+app.get('/api/sessions/code/:code', async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { code: req.params.code.toUpperCase() },
+      include: {
+        host: { select: { id: true, name: true } },
+        members: { select: { id: true, userId: true } }
+      }
+    });
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+    res.json({ success: true, session });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to find session' });
+  }
+});
+
+app.post('/api/sessions/code/:code/join', requireAuth, async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { code: req.params.code.toUpperCase() }
+    });
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+    if (!session.isActive) {
+      return res.status(400).json({ success: false, error: 'This session is no longer active' });
+    }
+    if (session.hostId === req.user.id) {
+      return res.status(400).json({ success: false, error: 'You are the host of this session' });
+    }
+    // Check if already joined
+    const existing = await prisma.sessionMember.findUnique({
+      where: { sessionId_userId: { sessionId: session.id, userId: req.user.id } }
+    });
+    if (existing) {
+      return res.json({ success: true, membership: existing, message: 'Already joined' });
+    }
+    const membership = await prisma.sessionMember.create({
+      data: {
+        sessionId: session.id,
+        userId: req.user.id,
+      }
+    });
+    console.log(`🔗 ${req.user.name} joined session ${session.code}`);
+    res.json({ success: true, membership });
+  } catch (error) {
+    console.error('❌ Session join error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to join session' });
+  }
+});
+
+app.get('/api/sessions/:id/results', requireAuth, async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: {
+        host: { select: { id: true, name: true } },
+        members: {
+          include: {
+            user: { select: { id: true, name: true, email: true } }
+          }
+        }
+      }
+    });
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+    if (session.hostId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Only the host can view session results' });
+    }
+    // Fetch records for members that have completed
+    const memberRecordIds = session.members
+      .filter(m => m.recordId)
+      .map(m => m.recordId);
+    const records = await prisma.record.findMany({
+      where: { id: { in: memberRecordIds } },
+      include: { user: { select: { id: true, name: true } } }
+    });
+    const recordMap = {};
+    records.forEach(r => { recordMap[r.id] = r; });
+
+    const membersWithResults = session.members.map(m => ({
+      id: m.id,
+      user: m.user,
+      joinedAt: m.joinedAt,
+      recordId: m.recordId,
+      record: m.recordId ? recordMap[m.recordId] || null : null,
+      status: m.recordId ? 'completed' : 'in-progress'
+    }));
+
+    res.json({
+      success: true,
+      session: {
+        id: session.id,
+        code: session.code,
+        title: session.title,
+        isActive: session.isActive,
+        createdAt: session.createdAt,
+        host: session.host,
+      },
+      members: membersWithResults
+    });
+  } catch (error) {
+    console.error('❌ Session results error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch session results' });
+  }
+});
+
+app.patch('/api/sessions/:id', requireAuth, async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({ where: { id: req.params.id } });
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+    if (session.hostId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Only the host can modify this session' });
+    }
+    const updated = await prisma.session.update({
+      where: { id: req.params.id },
+      data: { isActive: req.body.isActive ?? !session.isActive }
+    });
+    res.json({ success: true, session: updated });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to update session' });
+  }
+});
 
 // ─── SCENARIO FORMATS (11 formats — far beyond just budget allocation!) ───────
 const scenarioFormats = [
@@ -470,24 +923,24 @@ app.post('/api/evaluate-scenario', async (req, res) => {
         {
           role: 'system',
           content: `You are an expert behavioral assessor. You evaluate a student's performance on a decision-making scenario.
-You will receive the scenario context, the questions asked, and the student's answers.
+You will receive the scenario context, the questions asked, and the student's answers (which are mostly interactive choices like MCQs, sliders, and rankings, plus a final written reflection).
 
-Score every field on a continuous 0.0–1.0 scale. DO NOT default to 0.5 — read the answers and discriminate. Use the full range.
+Score every field on a continuous 0.0–1.0 scale. DO NOT default to 0.5 — discriminate based on their actions and responses. Use the full range.
 
 1. "accuracy_score": How pragmatic, logical and effective were their decisions given the scenario constraints (budget, time, relationships)?
    - 0.8-1.0: choices directly resolve the core tension and respect constraints.
    - 0.4-0.7: reasonable but partial or with notable trade-off blind spots.
    - 0.0-0.3: ignores constraints, contradictory, or off-topic.
 
-2. "cognitive_features" — apply these EXPLICIT RUBRICS:
-   - reflection_depth: reward word count + causal reasoning. Look for connectives like "because", "due to", "so that", "therefore", "consequently", and weighing of multiple factors. One-line/superficial answers → ≤0.3; multi-factor justified reasoning → ≥0.7.
-   - self_awareness: reward self-critical phrases and recognition of one's own mistakes/biases/limits in the reflection ("I should have", "my mistake", "I assumed", "I rushed", "next time I'd"). None → ≤0.2; explicit, specific self-critique → ≥0.75.
-   - learning_orientation: reward a concrete desire to improve and a stated plan for doing better next time. Vague "I'd do better" → ~0.4; specific, actionable improvement → ≥0.75.
-   - creativity_score: compare against the obvious/standard response. Reward novel, out-of-the-box, resourceful approaches. Generic textbook answer → ≤0.35; genuinely original idea → ≥0.75.
+2. "cognitive_features" — apply these EXPLICIT DECISION-BASED RUBRICS:
+   - reflection_depth: Evaluate how carefully the student weighed options. Check their written answers (type: reflection/text) for causal reasoning and connectives (e.g. "because", "due to"). Assess if their interactive choices show a deliberate, balanced approach to complex tradeoffs. Deliberate decisions and structured written reflection -> >=0.75; superficial written reflection and impulsive/rushed choices -> <=0.3.
+   - self_awareness: Evaluate if their choices (especially in crisis/urgent situations) show risk-awareness, caution, and a realization of role boundaries versus overconfident/reckless behavior. In the written reflection, check if they explicitly acknowledge mistakes, limits, or adjustments ("I should have", "my mistake"). High self-reflection and risk-aware choices -> >=0.75; reckless decisions and defensive/shallow reflection -> <=0.25.
+   - learning_orientation: Check if they select choices that prioritize information-seeking, advice, or testing over blind assumptions. In the written reflection, check for an explicit desire or plan to improve next time. High learning-oriented choices and growth mindset -> >=0.75; passive, defensive, or assumption-heavy choices -> <=0.35.
+   - creativity_score: Analyze if their decisions (such as budget slider allocations, risk-mitigation plans, and planning rankings) represent clever, resourceful, or unconventional solutions rather than standard, safe, or generic paths. High-ingenuity trade-offs -> >=0.75; generic, middle-of-the-road, or risk-averse choices -> <=0.4.
 
-3. "insights": 2-3 brief, specific observations about their decision-making style (reference what they actually wrote).
+3. "insights": 2-3 brief, specific observations about their decision-making style (reference what they actually chose and wrote).
 
-Gibberish, empty, or nonsensical answers → assign very low scores (≤0.1) and say so in insights.
+Gibberish, empty, or nonsensical answers -> assign very low scores (≤0.1) and say so in insights.
 Return ONLY valid JSON.`
         },
         {
@@ -606,20 +1059,20 @@ app.post('/api/records', async (req, res) => {
     const recordData = req.body;
     const name = recordData.name || 'Anonymous';
     
-    // Auto-create/find user
-    let user = await prisma.user.findFirst({
-      where: { name: name }
-    });
-    
+    // Use logged-in user if available, otherwise auto-create/find by name (guest mode)
+    let user = req.user;
     if (!user) {
-      user = await prisma.user.create({
-        data: {
-          name: name,
-          email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@aita.edu`,
-          passwordHash: 'dummy_hash',
-          role: 'STUDENT'
-        }
-      });
+      user = await prisma.user.findFirst({ where: { name: name } });
+      if (!user) {
+        user = await prisma.user.create({
+          data: {
+            name: name,
+            email: `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@aita.edu`,
+            passwordHash: hashPassword(crypto.randomBytes(16).toString('hex')),
+            role: 'USER'
+          }
+        });
+      }
     }
 
     // Save record linked to user
@@ -645,6 +1098,21 @@ app.post('/api/records', async (req, res) => {
         vark: recordData.vark || null
       }
     });
+
+    // If there's a sessionId, link this record to the session membership
+    if (recordData.sessionId && req.user) {
+      try {
+        await prisma.sessionMember.updateMany({
+          where: {
+            sessionId: recordData.sessionId,
+            userId: req.user.id
+          },
+          data: { recordId: savedRecord.id }
+        });
+      } catch (linkErr) {
+        console.warn('⚠️ Could not link record to session:', linkErr.message);
+      }
+    }
 
     res.json({ success: true, id: savedRecord.id });
   } catch (error) {
