@@ -1,7 +1,14 @@
 /// <reference types="vite/client" />
 import { CognitiveFeatures, DifficultySignal, Question, Scenario } from '../types/quiz.types';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '') || '/api';
+let rawBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+if (rawBase && !rawBase.startsWith('http://') && !rawBase.startsWith('https://')) {
+    rawBase = 'https://' + rawBase;
+}
+if (rawBase && !rawBase.endsWith('/api')) {
+    rawBase += '/api';
+}
+const API_BASE = rawBase || '/api';
 
 // ─── AUTH TOKEN MANAGEMENT ───────────────────────────────────────────────────
 function getToken(): string | null {
