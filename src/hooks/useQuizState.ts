@@ -1,78 +1,39 @@
 import { useState, useCallback } from 'react';
 import {
     Answers,
-    DifficultySignal,
     OverallMetrics,
     Question,
     Scenario,
     ScenarioResult,
     ScreenType,
 } from '../types/quiz.types';
-import { generateScenario as apiGenerateScenario, evaluateScenario as apiEvaluateScenario } from '../services/api';
+import { buildTest, computeVark, gradeTest } from '../data/questionBank';
 import {
     calculateDynamicConfidence,
     calculatePerformanceScore,
-    determineDifficultySignal,
     heuristicCognitiveFeatures,
 } from '../utils/classifyLearner';
 
-// Extract the reflection free-text answer (used for implicit confidence scoring)
-function getReflectionText(answers: Answers, questions: Question[]): string {
-    const reflectionQ = questions.find(q => q.type === 'reflection');
-    if (!reflectionQ) return '';
-    const raw = answers[reflectionQ.id];
-    if (Array.isArray(raw)) return raw.join(' ');
-    if (typeof raw === 'string') return raw.includes('|') ? raw.split('|').slice(1).join(' ') : raw;
-    return '';
-}
-
-// ─── FALLBACK ────────────────────────────────────────────────────────────────
-const getFallbackData = (): { scenario: Scenario; questions: Question[] } => ({
-    scenario: {
-        title: '📋 The Festival Budget Crisis',
-        description:
-            "You're the student council treasurer. You have Rs.50,000 in sponsorship but five clubs submitted proposals totalling Rs.75,000. The principal needs your allocation by 9 AM tomorrow.",
-        context_details: '• Drama Club: Rs.20,000\n• Science Club: Rs.18,000\n• Sports Club: Rs.15,000\n• Art Club: Rs.12,000\n• Music Club: Rs.10,000',
-        constraint: 'Total requested = Rs.75,000 — that is Rs.25,000 over your budget!',
-        urgency: 'The principal needs your final breakdown by 9 AM tomorrow.',
-        totalTimeLimit: 510,
-    },
-    questions: [
-        { id: 1, phase: 1, phaseName: 'Information Filtering', type: 'mcq', timeLimit: 45, question: 'Which piece of information is most critical to verify first?', options: ['The total sponsorship amount', 'The detailed breakdown of Drama Club\'s request', 'The principal\'s hard deadline', 'Whether any clubs can share resources'] },
-        { id: 2, phase: 2, phaseName: 'Information Filtering', type: 'mcq', timeLimit: 45, question: 'Sports club says they need Rs.15,000 for a tournament. What do you check?', options: ['Their previous year\'s expenditure', 'How many students are participating', 'If the tournament is an official university event', 'Can they get external sponsors'] },
-        { id: 3, phase: 3, phaseName: 'Resource Allocation', type: 'slider', timeLimit: 60, question: 'Allocate a budget for the Drama Club. They asked for Rs.20,000.', min: 0, max: 20000, unit: 'Rs.' },
-        { id: 4, phase: 4, phaseName: 'Resource Allocation', type: 'slider', timeLimit: 60, question: 'Allocate a budget for the Science Club. They asked for Rs.18,000.', min: 0, max: 18000, unit: 'Rs.' },
-        { id: 5, phase: 5, phaseName: 'Planning', type: 'ranking', timeLimit: 90, question: 'Rank these budget cut strategies from most fair to least fair.', hint: 'Consider the impact on the student body.', options: ['Cut everyone proportionally', 'Cut the largest requests the most', 'Prioritize academic clubs over entertainment', 'Ask clubs to fundraise the difference'] },
-        { id: 6, phase: 6, phaseName: 'Planning', type: 'ranking', timeLimit: 90, question: 'Rank these communication strategies for delivering the bad news.', options: ['Send a formal email to all presidents', 'Call an emergency in-person meeting', 'Tell the principal to announce it', 'Message them individually on WhatsApp'] },
-        { id: 7, phase: 7, phaseName: 'Risk Mitigation', type: 'mcq', timeLimit: 60, question: 'If you cut Music Club to Rs.10,000, what is the biggest risk?', options: ['They cancel their headline performance', 'They complain to the faculty advisor', 'They overspend anyway and send you the bill', 'They refuse to participate next year'] },
-        { id: 8, phase: 8, phaseName: 'Risk Mitigation', type: 'mcq', timeLimit: 60, question: 'What is your backup plan if the Rs.50,000 sponsorship is delayed by a week?', options: ['Borrow from the university emergency fund', 'Ask vendors for a credit extension', 'Cancel the festival', 'Ask students to pay an entry fee'] },
-        { id: 9, phase: 9, phaseName: 'Execution Twist', type: 'mcq-urgent', timeLimit: 30, urgentUpdate: '🚨 The primary sponsor just pulled out! Budget is now Rs.30,000!', question: 'You have 30 seconds. What is your immediate action?', options: ['Cancel the festival immediately', 'Halt all club spending and call a meeting', 'Distribute the 30k equally right now', 'Go to the principal for university funds'] },
-        { id: 10, phase: 10, phaseName: 'Execution Twist', type: 'mcq-urgent', timeLimit: 30, urgentUpdate: '🚨 Drama Club threatens to boycott if they don\'t get their full Rs.20k!', question: 'How do you respond?', options: ['Give them the money to save the fest', 'Let them boycott', 'Offer them Rs.15k as a final offer', 'Report them to the disciplinary committee'] },
-        { id: 11, phase: 11, phaseName: 'Ethical Dilemma', type: 'mcq', timeLimit: 60, question: 'The Art Club president is your close friend. Do you secretly tell them about the cuts first?', options: ['Yes, they deserve a heads up', 'No, that is favoritism', 'Hint at it but don\'t give numbers', 'Tell them, but swear them to secrecy'] },
-        { id: 12, phase: 12, phaseName: 'Ethical Dilemma', type: 'mcq', timeLimit: 60, question: 'A vendor offers you a 10% kickback if you allocate the budget to clubs that use them. Do you accept?', options: ['Yes, and use the kickback for the fest', 'No, that is corruption', 'Yes, and keep it', 'Report the vendor to the university'] },
-    ],
-});
-
 // ─── HOOK ────────────────────────────────────────────────────────────────────
+// Single-test flow: one randomized 15-question aptitude test built from the
+// local question bank, graded locally, then straight to the results dashboard.
 export function useQuizState() {
     const [screen, setScreen] = useState<ScreenType>('welcome');
     const [isLoading, setIsLoading] = useState(false);
 
-    // Current iteration state
+    // Current test state
     const [scenario, setScenario] = useState<Scenario | null>(null);
     const [questions, setQuestions] = useState<Question[]>([]);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [answers, setAnswers] = useState<Answers>({});
 
-    // Multi-iteration state
-    const [currentScenarioNumber, setCurrentScenarioNumber] = useState(1);
     const [difficultyLevel, setDifficultyLevel] = useState(5);
     const [scenarioResults, setScenarioResults] = useState<ScenarioResult[]>([]);
 
     // Student identity (for dashboards / persistence)
     const [studentName, setStudentName] = useState('');
 
-    // Cost tracking
+    // Cost tracking (no AI generation — always zero, kept for API compatibility)
     const [tokensUsed, setTokensUsed] = useState(0);
     const [totalCost, setTotalCost] = useState(0);
 
@@ -80,110 +41,43 @@ export function useQuizState() {
     const isFirstQuestion = currentQuestionIndex === 0;
     const isLastQuestion = currentQuestionIndex === totalQuestions - 1;
 
-    // ── Load scenario from API or fallback ────────────────────────────────────
-    const loadScenario = useCallback(
-        async (level: number, scenarioNum: number, signal?: DifficultySignal, previousThemes: string[] = []) => {
-            setIsLoading(true);
-            try {
-                const data = await apiGenerateScenario(signal, scenarioNum, level, previousThemes);
-                if (data.success) {
-                    setScenario(data.scenario);
-                    setQuestions(data.questions);
-                    setTokensUsed(prev => prev + data.usage.tokens);
-                    setTotalCost(prev => prev + data.usage.estimatedCost);
-                    return true;
-                }
-                throw new Error(data.message || 'Generation failed');
-            } catch (error) {
-                console.error('Using fallback:', error);
-                const fallback = getFallbackData();
-                setScenario(fallback.scenario);
-                setQuestions(fallback.questions);
-                return false;
-            } finally {
-                setIsLoading(false);
-            }
-        },
-        []
-    );
-
-    // ── START (from welcome screen with chosen difficulty) ─────────────────────
+    // ── START (build a fresh randomized test from the local bank) ─────────────
     const startQuiz = useCallback(async (chosenDifficulty: number, name?: string) => {
         if (name !== undefined) setStudentName(name);
-        setCurrentScenarioNumber(1);
         setDifficultyLevel(chosenDifficulty);
         setScenarioResults([]);
         setAnswers({});
         setCurrentQuestionIndex(0);
-        await loadScenario(chosenDifficulty, 1);
+
+        const test = buildTest();
+        setScenario(test.scenario);
+        setQuestions(test.questions);
         setScreen('quiz');
-    }, [loadScenario]);
+    }, []);
 
     // ── DASHBOARD NAVIGATION ──────────────────────────────────────────────────
     const goToWelcome = useCallback(() => setScreen('welcome'), []);
 
-    // ── COMPLETE ITERATION (saves results, shows inter-scenario) ──────────────
+    // ── COMPLETE TEST (grade locally, save result, show results dashboard) ────
     const completeScenario = useCallback(
-        async (overallMetrics: OverallMetrics, qMetrics?: any) => {
+        (overallMetrics: OverallMetrics, qMetrics?: any) => {
             if (isLoading) return;
             setIsLoading(true);
-            const reflectionText = getReflectionText(answers, questions);
             try {
-                // Fetch GPT evaluation for accuracy and cognitive features
-                const evaluationData = await apiEvaluateScenario(scenario, questions, answers, studentName);
+                const grade = gradeTest(questions, answers);
+                const accuracyScore = grade.accuracy;
 
-
-                if (evaluationData.success) {
-                    setTokensUsed(prev => prev + evaluationData.usage.tokens);
-                    setTotalCost(prev => prev + evaluationData.usage.estimatedCost);
-                }
-
-                const accuracyScore = evaluationData.success ? evaluationData.evaluation.accuracy_score : 0.5;
-                // Hybrid pipeline: trust the LLM when it succeeds, otherwise fall
-                // back to reliable client-side heuristics instead of flat 0.5s.
-                const cognitiveFeatures = evaluationData.success
-                    ? evaluationData.evaluation.cognitive_features
-                    : heuristicCognitiveFeatures(answers, questions, overallMetrics);
-
-                // Extract VARK score from evaluation
-                const varkScores = evaluationData.success && evaluationData.evaluation.vark
-                    ? evaluationData.evaluation.vark
-                    : (() => {
-                        let varkSummary = { V: 0, A: 0, R: 0, K: 0 };
-                        let varkCount = 0;
-                        questions.forEach(q => {
-                            if (q.type === 'vark' && q.varkMapping) {
-                                const studentAnswer = answers[q.id];
-                                const selectedIndex = (q.options || []).indexOf(studentAnswer as string);
-                                if (selectedIndex !== -1) {
-                                    const mapping = q.varkMapping[selectedIndex];
-                                    if (mapping && mapping in varkSummary) {
-                                        varkSummary[mapping as keyof typeof varkSummary]++;
-                                        varkCount++;
-                                    }
-                                }
-                            }
-                        });
-                        return {
-                            visual: varkCount > 0 ? varkSummary.V / varkCount : 0.25,
-                            auditory: varkCount > 0 ? varkSummary.A / varkCount : 0.25,
-                            readWrite: varkCount > 0 ? varkSummary.R / varkCount : 0.25,
-                            kinesthetic: varkCount > 0 ? varkSummary.K / varkCount : 0.25,
-                        };
-                    })();
+                // Behaviour-driven cognitive features (client-side heuristics)
+                const cognitiveFeatures = heuristicCognitiveFeatures(answers, questions, overallMetrics);
 
                 // Implicit, behaviour-driven confidence (no self-report slider)
-                const confidence = calculateDynamicConfidence(
-                    overallMetrics,
-                    accuracyScore,
-                    reflectionText
-                );
+                const confidence = calculateDynamicConfidence(overallMetrics, accuracyScore, '');
 
                 const perfScore = calculatePerformanceScore(overallMetrics, confidence, accuracyScore, difficultyLevel);
 
                 const result: ScenarioResult = {
-                    scenarioNumber: currentScenarioNumber,
-                    scenarioTitle: scenario?.title || `Round ${currentScenarioNumber}`,
+                    scenarioNumber: 1,
+                    scenarioTitle: scenario?.title || 'General Aptitude Test',
                     difficultyLevel,
                     avgResponseTime: overallMetrics.avgResponseTime,
                     totalAnswerChanges: overallMetrics.totalAnswerChanges,
@@ -196,120 +90,27 @@ export function useQuizState() {
                     performanceScore: perfScore,
                     accuracyScore,
                     cognitive: cognitiveFeatures,
-                    vark: varkScores,
+                    vark: computeVark(questions, answers, overallMetrics.totalAnswerChanges),
                     avgTimeToStart: overallMetrics.avgTimeToStart,
                     totalResponseLength: overallMetrics.totalResponseLength,
                     skippedQuestions: overallMetrics.skippedQuestions,
                     overtimeCount: overallMetrics.overtimeCount,
+                    marksObtained: grade.correct,
+                    totalMarks: grade.graded,
+                    perQuestionCorrect: grade.perQuestion,
                     answers: { ...answers },
                     questions: [...questions],
                     questionsMetrics: qMetrics ? { ...qMetrics } : undefined,
                 };
 
-                setScenarioResults(prev => [...prev, result]);
-                setScreen('inter-scenario');
-            } catch (error) {
-                console.error("Failed to evaluate scenario:", error);
-                // Fallback result if API fails — use client-side heuristics, not flat 0.5s
-                const cognitiveFeatures = heuristicCognitiveFeatures(answers, questions, overallMetrics);
-                const accuracyScore = 0.5;
-                const confidence = calculateDynamicConfidence(
-                    overallMetrics,
-                    accuracyScore,
-                    reflectionText
-                );
-
-                // Local fallback VARK calculation
-                let varkSummary = { V: 0, A: 0, R: 0, K: 0 };
-                let varkCount = 0;
-                questions.forEach(q => {
-                    if (q.type === 'vark' && q.varkMapping) {
-                        const studentAnswer = answers[q.id];
-                        const selectedIndex = (q.options || []).indexOf(studentAnswer as string);
-                        if (selectedIndex !== -1) {
-                            const mapping = q.varkMapping[selectedIndex];
-                            if (mapping && mapping in varkSummary) {
-                                varkSummary[mapping as keyof typeof varkSummary]++;
-                                varkCount++;
-                            }
-                        }
-                    }
-                });
-                const varkScores = {
-                    visual: varkCount > 0 ? varkSummary.V / varkCount : 0.25,
-                    auditory: varkCount > 0 ? varkSummary.A / varkCount : 0.25,
-                    readWrite: varkCount > 0 ? varkSummary.R / varkCount : 0.25,
-                    kinesthetic: varkCount > 0 ? varkSummary.K / varkCount : 0.25,
-                };
-
-                const result: ScenarioResult = {
-                    scenarioNumber: currentScenarioNumber,
-                    scenarioTitle: scenario?.title || `Round ${currentScenarioNumber}`,
-                    difficultyLevel,
-                    avgResponseTime: overallMetrics.avgResponseTime,
-                    totalAnswerChanges: overallMetrics.totalAnswerChanges,
-                    backtrackCount: overallMetrics.backtrackCount,
-                    rushedDecisions: overallMetrics.rushedDecisions,
-                    overthinkingCount: overallMetrics.overthinkingCount,
-                    timeVariance: overallMetrics.timeVariance,
-                    confidence,
-                    decisionStyle: overallMetrics.decisionStyle,
-                    performanceScore: calculatePerformanceScore(overallMetrics, confidence, accuracyScore, difficultyLevel),
-                    accuracyScore,
-                    cognitive: cognitiveFeatures,
-                    vark: varkScores,
-                    avgTimeToStart: overallMetrics.avgTimeToStart,
-                    totalResponseLength: overallMetrics.totalResponseLength,
-                    skippedQuestions: overallMetrics.skippedQuestions,
-                    overtimeCount: overallMetrics.overtimeCount,
-                    answers: { ...answers },
-                    questions: [...questions],
-                    questionsMetrics: qMetrics ? { ...qMetrics } : undefined,
-                };
-                setScenarioResults(prev => [...prev, result]);
-                setScreen('inter-scenario');
+                setScenarioResults([result]);
+                setScreen('results');
             } finally {
                 setIsLoading(false);
             }
         },
-        [currentScenarioNumber, scenario, questions, difficultyLevel, answers, isLoading]
+        [scenario, questions, difficultyLevel, answers, isLoading]
     );
-
-    // ── CONTINUE TO NEXT ROUND (user chose new difficulty) ────────────────────
-    const proceedToNextScenario = useCallback(async (newDifficulty: number) => {
-        const nextNum = currentScenarioNumber + 1;
-        setDifficultyLevel(newDifficulty);
-        setCurrentQuestionIndex(0);
-        setAnswers({});
-        setCurrentScenarioNumber(nextNum);
-
-        // Use adaptive signal based on last performance
-        const lastResult = scenarioResults[scenarioResults.length - 1];
-        const signal = lastResult
-            ? determineDifficultySignal(
-                  {
-                      avgResponseTime: lastResult.avgResponseTime,
-                      totalAnswerChanges: lastResult.totalAnswerChanges,
-                      backtrackCount: lastResult.backtrackCount,
-                      rushedDecisions: lastResult.rushedDecisions,
-                      overthinkingCount: lastResult.overthinkingCount,
-                      timeVariance: lastResult.timeVariance,
-                      decisionStyle: lastResult.decisionStyle as any,
-                  } as any,
-                  lastResult.performanceScore
-              )
-            : undefined;
-
-        const previousThemes = scenarioResults.map(r => r.scenarioTitle);
-
-        await loadScenario(newDifficulty, nextNum, signal, previousThemes);
-        setScreen('quiz');
-    }, [currentScenarioNumber, loadScenario, scenarioResults]);
-
-    // ── FINISH EARLY (user chose to stop) ─────────────────────────────────────
-    const finishAssessment = useCallback(() => {
-        setScreen('results');
-    }, []);
 
     // ── ANSWER / NAVIGATION ───────────────────────────────────────────────────
     const setAnswer = useCallback((questionId: number, answer: string | string[]) => {
@@ -328,7 +129,7 @@ export function useQuizState() {
         }
     }, [currentQuestionIndex]);
 
-    // Direct jump (Improvement #9) — used by the question navigation grid.
+    // Direct jump — used by the question navigation grid.
     const goToQuestion = useCallback((index: number) => {
         if (index >= 0 && index < totalQuestions) {
             setCurrentQuestionIndex(index);
@@ -342,7 +143,6 @@ export function useQuizState() {
         setQuestions([]);
         setCurrentQuestionIndex(0);
         setAnswers({});
-        setCurrentScenarioNumber(1);
         setDifficultyLevel(5);
         setScenarioResults([]);
     }, []);
@@ -362,7 +162,6 @@ export function useQuizState() {
         answers,
         isFirstQuestion,
         isLastQuestion,
-        currentScenarioNumber,
         difficultyLevel,
         scenarioResults,
         studentName,
@@ -371,8 +170,6 @@ export function useQuizState() {
 
         startQuiz,
         completeScenario,
-        proceedToNextScenario,
-        finishAssessment,
         setAnswer,
         goToNextQuestion,
         goToPreviousQuestion,

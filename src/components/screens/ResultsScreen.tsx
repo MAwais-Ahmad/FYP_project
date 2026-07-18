@@ -194,10 +194,50 @@ export function ResultsScreen({
                 <div>
                     <h1 className="text-3xl md:text-4xl font-bold">Assessment Complete!</h1>
                     <p className="text-white/60">
-                        {scenarioResults.length} scenario{scenarioResults.length !== 1 ? 's' : ''} processed — here&apos;s your personalized breakdown.
+                        {latest?.totalMarks
+                            ? <>You scored <strong className="text-white">{latest.marksObtained}/{latest.totalMarks}</strong> — here&apos;s your personalized breakdown.</>
+                            : <>Here&apos;s your personalized breakdown.</>}
                     </p>
                 </div>
             </div>
+
+            {/* ── MARKS ───────────────────────────────────────────────────────── */}
+            {latest?.totalMarks ? (
+                <div className="glass-card p-6 flex flex-col sm:flex-row items-center gap-6">
+                    <div className="text-center shrink-0">
+                        <div className="text-5xl font-extrabold bg-gradient-to-r from-emerald-300 to-teal-300 bg-clip-text text-transparent">
+                            {latest.marksObtained}<span className="text-white/40 text-3xl">/{latest.totalMarks}</span>
+                        </div>
+                        <div className="text-xs uppercase tracking-widest text-white/50 mt-1">Marks Scored</div>
+                        <div className="text-sm text-white/60 mt-1">
+                            {Math.round(((latest.marksObtained ?? 0) / latest.totalMarks) * 100)}% · 1 mark per question
+                        </div>
+                    </div>
+                    {latest.perQuestionCorrect && latest.questions && (
+                        <div className="flex-1 w-full">
+                            <div className="text-xs uppercase tracking-wide text-white/50 mb-2">Question Breakdown</div>
+                            <div className="flex flex-wrap gap-2">
+                                {latest.questions.map((q, idx) => {
+                                    const ok = latest.perQuestionCorrect?.[q.id];
+                                    return (
+                                        <div
+                                            key={q.id}
+                                            title={`Q${idx + 1} · ${q.phaseName} — ${ok ? 'Correct' : 'Incorrect'}`}
+                                            className={`w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold border
+                                                ${ok
+                                                    ? 'bg-emerald-500/25 border-emerald-400/40 text-emerald-200'
+                                                    : 'bg-red-500/20 border-red-400/40 text-red-300'}`}
+                                        >
+                                            {idx + 1}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <p className="text-xs text-white/40 mt-2">Green = correct (1 mark) · Red = incorrect (0 marks). Hover a tile for the section.</p>
+                        </div>
+                    )}
+                </div>
+            ) : null}
 
             {/* ── LEARNER CATEGORY HERO ──────────────────────────────────────── */}
             {categoryResult && primary && (
@@ -276,7 +316,7 @@ export function ResultsScreen({
                         🎧 Sensory Learning Style (VARK)
                     </h3>
                     <p className="text-xs text-white/50 leading-relaxed max-w-xl">
-                        This indicates how your brain prefers to absorb study material (Visual, Auditory, Read/Write, Kinesthetic). Click details below for customized suggestions.
+                        Estimated from how you actually performed across the question formats in this test — diagram questions (Visual), typed answers and word problems (Read/Write), language &amp; recall questions (Auditory proxy), and applied problem-solving with hands-on experimentation (Kinesthetic).
                     </p>
                     <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6 pt-2">
                         {/* Visual */}

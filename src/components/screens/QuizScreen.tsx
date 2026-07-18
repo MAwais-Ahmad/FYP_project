@@ -16,7 +16,6 @@ interface QuizScreenProps {
     questions: Question[];
     currentQuestionIndex: number;
     answers: Answers;
-    currentScenarioNumber: number;
     onAnswer: (questionId: number, answer: string | string[]) => void;
     onNext: () => void;
     onPrevious: () => void;
@@ -34,7 +33,6 @@ export function QuizScreen({
     questions,
     currentQuestionIndex,
     answers,
-    currentScenarioNumber,
     onAnswer,
     onNext,
     onPrevious,
@@ -238,10 +236,10 @@ export function QuizScreen({
             <header className="flex flex-wrap items-center justify-between gap-2 mb-3 shrink-0">
                 <div className="flex items-center gap-2">
                     <div className="px-2.5 py-1 rounded-full text-xs font-medium bg-white/10 border border-white/20 text-white/70">
-                        Scenario {currentScenarioNumber}
+                        Aptitude Test
                     </div>
                     <div className="phase-badge !px-3 !py-1 !text-xs">
-                        P{question.phase}: {question.phaseName}
+                        {question.phaseName}
                     </div>
                 </div>
 
@@ -263,7 +261,7 @@ export function QuizScreen({
                     {scenario.totalTimeLimit && scenario.totalTimeLimit > 0 && (
                         <div
                             className={`px-3 py-1.5 rounded-full border text-sm font-mono font-medium flex items-center gap-1.5 ${getOverallTimerClasses()}`}
-                            title="Total time remaining for this scenario"
+                            title="Total time remaining for this test"
                         >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <circle cx="12" cy="12" r="10" />
@@ -322,7 +320,7 @@ export function QuizScreen({
 
                 {isLastQuestion ? (
                     <button onClick={onCompleteScenario} className="btn-success !py-2 !px-4 text-sm">
-                        <span className="hidden sm:inline">Submit Scenario {currentScenarioNumber}</span>
+                        <span className="hidden sm:inline">Submit Test</span>
                         <span className="sm:hidden">Submit</span>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M20 6L9 17l-5-5" />

@@ -37,6 +37,11 @@ export interface Question {
     min?: number;
     max?: number;
     unit?: string;
+    // Aptitude-test properties
+    category?: 'math' | 'verbal' | 'logical' | 'gk' | 'visual';
+    svg?: string; // inline SVG diagram (visual questions)
+    correctAnswer?: string; // MCQ: the correct letter ("A".."E"); text: canonical answer
+    accept?: string[]; // text questions: additional accepted answers
 }
 
 export interface QuestionMetrics {
@@ -132,6 +137,10 @@ export interface ScenarioResult {
     totalResponseLength: number;
     skippedQuestions: number;
     overtimeCount: number;
+    // Marks (1 mark per question)
+    marksObtained?: number;
+    totalMarks?: number;
+    perQuestionCorrect?: Record<number, boolean>;
     answers: Answers;
     questions?: Question[];
     questionsMetrics?: Record<

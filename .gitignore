@@ -4,6 +4,9 @@
 # Node modules
 node_modules/
 
+# Local embedded PostgreSQL data
+.pgdata/
+
 # Logs
 *.log
 npm-debug.log*

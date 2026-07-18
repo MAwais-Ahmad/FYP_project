@@ -7,7 +7,6 @@ import {
     RecordDetail,
     QuizScreen,
     ResultsScreen,
-    InterScenarioScreen,
 } from './components';
 import { useQuizState, useMetrics } from './hooks';
 import { AuthUser, getMe, logout as apiLogout } from './services/api';
@@ -29,15 +28,12 @@ function App() {
         questions,
         currentQuestionIndex,
         answers,
-        currentScenarioNumber,
         scenarioResults,
         studentName,
         tokensUsed,
         totalCost,
         startQuiz,
         completeScenario,
-        proceedToNextScenario,
-        finishAssessment,
         setAnswer,
         goToNextQuestion,
         goToPreviousQuestion,
@@ -116,7 +112,7 @@ function App() {
         setCurrentUser(null);
         setActiveSessionId(null);
         setSelectedRecord(null);
-        goToWelcome();
+        setScreen('auth');
     };
 
 
@@ -139,12 +135,6 @@ function App() {
     const handleCompleteScenario = () => {
         const overall = calculateOverallMetrics();
         completeScenario(overall, questionsMetrics);
-    };
-
-    const handleProceedToNextScenario = async (newDifficulty: number) => {
-        resetMetrics();
-        startMetrics();
-        await proceedToNextScenario(newDifficulty);
     };
 
     const handleRestart = () => {
@@ -230,23 +220,6 @@ function App() {
 
     return (
         <div className="app-container min-h-screen">
-            {/* Mid-Quiz Disconnect Warning Overlay */}
-            {isOffline && screen === 'quiz' && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6 animate-fadeIn">
-                    <div className="glass-card max-w-md w-full p-8 text-center space-y-4 border border-yellow-500/20 shadow-2xl">
-                        <div className="text-5xl animate-bounce">⚠️</div>
-                        <h2 className="text-2xl font-bold text-white">Network Signal Lost</h2>
-                        <p className="text-white/60 text-sm leading-relaxed">
-                            We cannot evaluate your cognitive features without a stable connection. Please reconnect to resume and ensure your final learning style classification remains accurate.
-                        </p>
-                        <div className="flex items-center justify-center gap-2 text-xs text-yellow-400 font-semibold uppercase tracking-wider bg-yellow-500/10 py-2 px-3 rounded-lg border border-yellow-500/15">
-                            <span className="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span>
-                            <span>Waiting for connection...</span>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* Auth Screen */}
             {screen === 'auth' && (
                 <AuthScreen
@@ -304,7 +277,6 @@ function App() {
                     questions={questions}
                     currentQuestionIndex={currentQuestionIndex}
                     answers={answers}
-                    currentScenarioNumber={currentScenarioNumber}
                     onAnswer={handleAnswer}
                     onNext={goToNextQuestion}
                     onPrevious={goToPreviousQuestion}
@@ -315,16 +287,6 @@ function App() {
                     onQuestionStart={recordQuestionStart}
                     onQuestionEnd={recordQuestionEnd}
                     onBacktrack={recordBacktrack}
-                />
-            )}
-
-            {screen === 'inter-scenario' && (
-                <InterScenarioScreen
-                    completedScenarioNumber={currentScenarioNumber}
-                    scenarioResult={scenarioResults[scenarioResults.length - 1] ?? null}
-                    isLoading={isLoading}
-                    onContinue={handleProceedToNextScenario}
-                    onFinish={finishAssessment}
                 />
             )}
 
