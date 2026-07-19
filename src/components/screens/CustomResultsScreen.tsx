@@ -1,4 +1,6 @@
 import { CustomExamResults } from './CustomQuizScreen';
+import { classifyLearner, LEARNER_CATEGORIES, heuristicCognitiveFeatures, calculateDynamicConfidence } from '../../utils/classifyLearner';
+import { OverallMetrics } from '../../types/quiz.types';
 
 interface CustomResultsScreenProps {
     results: CustomExamResults;
@@ -15,37 +17,43 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
         return m > 0 ? `${m}m ${s}s` : `${s}s`;
     };
 
-    // Derive cognitive insight from behavioral data
-    const avgTime = avgTimePerQuestion;
     const skippedCount = questions.length - Object.keys(selectedAnswers).length;
-    let cognitiveInsight = '';
-    let insightEmoji = '';
+    const accuracyScore = obtainedMarks / Math.max(1, totalMarks);
 
-    if (percentage >= 80 && avgTime < 30 && totalRevisions <= 2) {
-        cognitiveInsight = 'Fast Learner';
-        insightEmoji = '⚡';
-    } else if (percentage >= 70 && totalRevisions >= 3 && avgTime > 30) {
-        cognitiveInsight = 'Strategic Thinker';
-        insightEmoji = '♟️';
-    } else if (percentage >= 60 && avgTime > 45) {
-        cognitiveInsight = 'Slow & Thorough';
-        insightEmoji = '🔬';
-    } else if (percentage >= 50 && avgTime < 20 && totalRevisions <= 1) {
-        cognitiveInsight = 'Quick & Careless';
-        insightEmoji = '💨';
-    } else if (percentage >= 50) {
-        cognitiveInsight = 'Steady Achiever';
-        insightEmoji = '📊';
-    } else if (skippedCount >= 2) {
-        cognitiveInsight = 'Disengaged / Avoider';
-        insightEmoji = '🚪';
-    } else if (percentage < 40 && totalRevisions >= 3) {
-        cognitiveInsight = 'Concept Struggler';
-        insightEmoji = '🧩';
-    } else {
-        cognitiveInsight = 'Inconsistent Performer';
-        insightEmoji = '🎭';
-    }
+    // Build overall metrics for full classification engine
+    const overallMetrics: OverallMetrics = {
+        totalTime,
+        avgResponseTime: avgTimePerQuestion,
+        avgTimeToStart: 3,
+        timeVariance: '0.3',
+        rushedDecisions: avgTimePerQuestion < 20 ? 2 : 0,
+        overthinkingCount: avgTimePerQuestion > 70 ? 2 : 0,
+        totalAnswerChanges: totalRevisions,
+        backtrackCount: 0,
+        questionsAnswered: Object.keys(selectedAnswers).length,
+        totalResponseLength: 0,
+        skippedQuestions: skippedCount,
+        overtimeCount: 0,
+        timeTrend: 'stable',
+        decisionStyle: avgTimePerQuestion < 25 ? 'impulsive' : avgTimePerQuestion > 60 ? 'deliberate' : 'balanced',
+    };
+
+    const cognitive = heuristicCognitiveFeatures(selectedAnswers as any, [], overallMetrics);
+    const confidence = calculateDynamicConfidence(overallMetrics, accuracyScore, '');
+
+    // Full multi-dimensional classification engine call
+    const categoryResult = classifyLearner({
+        overall: overallMetrics,
+        cognitive,
+        scenarioResults: [],
+        confidence,
+        accuracyScore,
+    });
+
+    const primaryProfile = LEARNER_CATEGORIES[categoryResult.primary_category];
+
+    const cognitiveInsight = categoryResult.primary_name;
+    const insightEmoji = categoryResult.primary_emoji;
 
     const scoreColor = percentage >= 70 ? 'text-green-400' : percentage >= 50 ? 'text-yellow-400' : 'text-red-400';
     const scoreBg = percentage >= 70 ? 'from-green-500/20 to-green-500/5' : percentage >= 50 ? 'from-yellow-500/20 to-yellow-500/5' : 'from-red-500/20 to-red-500/5';
@@ -64,11 +72,11 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
                     <p className="text-white/50">{examTitle}</p>
                 </div>
 
-                {/* Score Card */}
-                <div className={`glass-card p-6 bg-gradient-to-br ${scoreBg} border border-white/10`}>
+                {/* Score & Cognitive Profile Card */}
+                <div className={`glass-card p-6 bg-gradient-to-br ${scoreBg} border border-white/10 space-y-4`}>
                     <div className="flex items-center justify-between flex-wrap gap-4">
                         <div className="space-y-1">
-                            <p className="text-sm text-white/50 uppercase tracking-wider">Your Score</p>
+                            <p className="text-xs text-white/50 uppercase tracking-wider">Your Exam Score</p>
                             <div className={`text-5xl font-black ${scoreColor}`}>
                                 {obtainedMarks} / {totalMarks}
                             </div>
@@ -77,12 +85,29 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
                             </div>
                         </div>
 
-                        <div className="text-center p-4 rounded-2xl bg-white/5 border border-white/10">
+                        <div className="text-center p-4 rounded-2xl bg-white/5 border border-white/10 max-w-xs">
                             <div className="text-4xl mb-1">{insightEmoji}</div>
-                            <p className="text-sm font-bold text-primary-300">{cognitiveInsight}</p>
-                            <p className="text-[10px] text-white/40">Cognitive Profile</p>
+                            <p className="text-base font-bold text-primary-300">{cognitiveInsight}</p>
+                            <p className="text-xs text-green-400 font-medium">
+                                Math Confidence: {Math.round(categoryResult.primary_confidence * 100)}%
+                            </p>
+                            {categoryResult.secondary_name && (
+                                <p className="text-[10px] text-white/40 mt-1">
+                                    Blend: {categoryResult.secondary_emoji} {categoryResult.secondary_name} ({Math.round((categoryResult.secondary_confidence || 0) * 100)}%)
+                                </p>
+                            )}
                         </div>
                     </div>
+
+                    {primaryProfile && (
+                        <div className="pt-3 border-t border-white/10 space-y-2 text-xs">
+                            <p className="text-white/80 leading-relaxed">{primaryProfile.description}</p>
+                            <div className="flex items-center gap-2 text-accent-300 font-medium">
+                                <span>🎯 Key Focus:</span>
+                                <span>{primaryProfile.focusArea}</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Stats Grid */}
@@ -92,7 +117,7 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
                         <p className="text-xs text-white/40 mt-1">Total Time</p>
                     </div>
                     <div className="glass-card p-4 text-center">
-                        <p className="text-2xl font-bold text-white">{formatTime(avgTime)}</p>
+                        <p className="text-2xl font-bold text-white">{formatTime(avgTimePerQuestion)}</p>
                         <p className="text-xs text-white/40 mt-1">Avg per Question</p>
                     </div>
                     <div className="glass-card p-4 text-center">
