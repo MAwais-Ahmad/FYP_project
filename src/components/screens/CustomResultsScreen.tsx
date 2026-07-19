@@ -20,22 +20,47 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
     const skippedCount = questions.length - Object.keys(selectedAnswers).length;
     const accuracyScore = obtainedMarks / Math.max(1, totalMarks);
 
-    // Build overall metrics for full classification engine
+    // Compute dynamic item-level timing metrics from questionTimes
+    const times = Object.values(questionTimes);
+    const validTimes = times.filter(t => t > 0);
+    const meanTime = validTimes.length > 0 ? validTimes.reduce((a, b) => a + b, 0) / validTimes.length : avgTimePerQuestion;
+
+    // Coefficient of variation (stdDev / mean) for pacing consistency
+    const varianceVal = validTimes.length > 1
+        ? Math.sqrt(validTimes.reduce((sum, t) => sum + Math.pow(t - meanTime, 2), 0) / validTimes.length) / (meanTime || 1)
+        : 0.25;
+
+    const rushedCount = validTimes.filter(t => t < 15).length;
+    const overthinkingVal = validTimes.filter(t => t > 60).length;
+    const overtimeVal = validTimes.filter(t => t > 90).length;
+
+    // Pacing trend (speeding up vs slowing down)
+    let timeTrendVal: 'speeding_up' | 'slowing_down' | 'stable' = 'stable';
+    if (validTimes.length >= 4) {
+        const firstHalf = validTimes.slice(0, Math.floor(validTimes.length / 2));
+        const secondHalf = validTimes.slice(Math.floor(validTimes.length / 2));
+        const avg1 = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+        const avg2 = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+        if (avg2 < avg1 * 0.8) timeTrendVal = 'speeding_up';
+        else if (avg2 > avg1 * 1.2) timeTrendVal = 'slowing_down';
+    }
+
+    // Build complete multi-dimensional overall metrics
     const overallMetrics: OverallMetrics = {
         totalTime,
-        avgResponseTime: avgTimePerQuestion,
-        avgTimeToStart: 3,
-        timeVariance: '0.3',
-        rushedDecisions: avgTimePerQuestion < 20 ? 2 : 0,
-        overthinkingCount: avgTimePerQuestion > 70 ? 2 : 0,
+        avgResponseTime: meanTime,
+        avgTimeToStart: 2.5,
+        timeVariance: varianceVal.toFixed(2),
+        rushedDecisions: rushedCount,
+        overthinkingCount: overthinkingVal,
         totalAnswerChanges: totalRevisions,
         backtrackCount: 0,
         questionsAnswered: Object.keys(selectedAnswers).length,
         totalResponseLength: 0,
         skippedQuestions: skippedCount,
-        overtimeCount: 0,
-        timeTrend: 'stable',
-        decisionStyle: avgTimePerQuestion < 25 ? 'impulsive' : avgTimePerQuestion > 60 ? 'deliberate' : 'balanced',
+        overtimeCount: overtimeVal,
+        timeTrend: timeTrendVal,
+        decisionStyle: meanTime < 25 ? 'impulsive' : meanTime > 60 ? 'deliberate' : 'balanced',
     };
 
     const cognitive = heuristicCognitiveFeatures(selectedAnswers as any, [], overallMetrics);
