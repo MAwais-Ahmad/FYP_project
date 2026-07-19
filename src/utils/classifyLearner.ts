@@ -442,12 +442,16 @@ export function heuristicCognitiveFeatures(
         }
     }
 
+    const evaluationInsight = words > 0
+        ? 'Tri-Factor Cognitive Evaluation (Language + Behavior + Decision Dynamics) applied for fair & inclusive diagnosis.'
+        : 'Dual-Factor Cognitive Evaluation (Behavioral Telemetry + Decision Dynamics) applied for MCQ assessment.';
+
     return {
         reflection_depth: Math.round(reflection_depth * 100) / 100,
         self_awareness: Math.round(self_awareness * 100) / 100,
         learning_orientation: Math.round(learning_orientation * 100) / 100,
         creativity_score: Math.round(creativity_score * 100) / 100,
-        insights: ['Tri-Factor Cognitive Evaluation (Language + Behavior + Decision Dynamics) applied for fair & inclusive diagnosis.'],
+        insights: [evaluationInsight],
     };
 }
 
