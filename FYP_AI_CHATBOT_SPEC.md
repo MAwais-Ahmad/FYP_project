@@ -76,24 +76,24 @@ graph TD
 
 ## 6. Implementation Task Checklist
 
-- [ ] **Backend (`server/server.cjs`):**
-  - [ ] Implement `POST /api/chat` route with system prompt guardrails.
-  - [ ] Add context-injection logic (handling active record payload & student record lookup).
-  - [ ] Add OpenRouter API fetch call with OpenAI fallback.
+- [x] **Backend (`server/server.cjs`):**
+  - [x] Implement `POST /api/chat` route with system prompt guardrails.
+  - [x] Add context-injection logic (handling active record payload & student record lookup).
+  - [x] Add OpenRouter API fetch call with OpenAI fallback.
 
-- [ ] **Frontend API Layer (`src/services/api.ts`):**
-  - [ ] Add `sendChatMessage(messages, recordContext)` API function.
+- [x] **Frontend API Layer (`src/services/api.ts`):**
+  - [x] Add `sendChatMessage(messages, recordContext)` API function.
 
-- [ ] **Frontend Component (`src/components/ui/AIChatDrawer.tsx`):**
-  - [ ] Build floating trigger button component.
-  - [ ] Build slide-out glassmorphic drawer UI with quick-prompt chips.
-  - [ ] Handle auto-scrolling, loading states, and error handling.
+- [x] **Frontend Component (`src/components/ui/AIChatDrawer.tsx`):**
+  - [x] Build floating trigger button component.
+  - [x] Build slide-out glassmorphic drawer UI with quick-prompt chips.
+  - [x] Handle auto-scrolling, loading states, and error handling.
 
-- [ ] **Screen Integration (`App.tsx` & Dashboards):**
-  - [ ] Mount `AIChatDrawer` globally across User Dashboard, Session Dashboard, ResultsScreen, and RecordDetail.
-  - [ ] Pass current active record context to the drawer dynamically.
+- [x] **Screen Integration (`App.tsx` & Dashboards):**
+  - [x] Mount `AIChatDrawer` globally across User Dashboard, Session Dashboard, ResultsScreen, and RecordDetail.
+  - [x] Pass current active record context to the drawer dynamically.
 
-- [ ] **Verification & Testing:**
-  - [ ] Test student personal coaching queries.
-  - [ ] Test teacher student lookup queries (*"Tell me about Awais"*).
-  - [ ] Verify guardrail enforcement (authoritative framing, no vulnerability leaks).
+- [x] **Verification & Testing:**
+  - [x] Test student personal coaching queries.
+  - [x] Test teacher student lookup queries (*"Tell me about Awais"*).
+  - [x] Verify guardrail enforcement (authoritative framing, no vulnerability leaks).
