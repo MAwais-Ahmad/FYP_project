@@ -398,7 +398,7 @@ export function AssessmentSetupScreen({
                                 <input
                                     ref={fileInputRef}
                                     type="file"
-                                    accept=".pdf"
+                                    accept=".pdf,.pptx,.ppt,.docx,.txt"
                                     className="hidden"
                                     onChange={(e) => {
                                         const file = e.target.files?.[0];
@@ -408,19 +408,19 @@ export function AssessmentSetupScreen({
                                 {isUploading ? (
                                     <div className="space-y-2">
                                         <div className="text-4xl animate-spin">⏳</div>
-                                        <p className="text-white/60">Extracting text from PDF...</p>
+                                        <p className="text-white/60">Extracting text from document...</p>
                                     </div>
                                 ) : extractedText ? (
                                     <div className="space-y-2">
                                         <div className="text-4xl">✅</div>
-                                        <p className="text-green-300 font-semibold">PDF Loaded ({pdfPageCount} pages)</p>
+                                        <p className="text-green-300 font-semibold">Document Loaded ({pdfPageCount} pages / sections)</p>
                                         <p className="text-white/40 text-xs">Click to replace with a different file</p>
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
                                         <div className="text-4xl">📤</div>
-                                        <p className="text-white/70 font-medium">Click to upload exam paper PDF</p>
-                                        <p className="text-white/40 text-xs">Max 10MB • Digital PDFs supported</p>
+                                        <p className="text-white/70 font-medium">Click to upload PDF, PPTX slides, or DOCX exam paper</p>
+                                        <p className="text-white/40 text-xs">Supports PDF, PowerPoint (.pptx), Word (.docx), TXT (Max 15MB)</p>
                                     </div>
                                 )}
                             </div>
@@ -589,7 +589,7 @@ export function AssessmentSetupScreen({
                             <input
                                 ref={materialFileRef}
                                 type="file"
-                                accept=".pdf"
+                                accept=".pdf,.pptx,.ppt,.docx,.txt"
                                 className="hidden"
                                 onChange={(e) => {
                                     const file = e.target.files?.[0];
@@ -599,13 +599,13 @@ export function AssessmentSetupScreen({
                             {materialPageCount > 0 ? (
                                 <div className="space-y-1">
                                     <div className="text-3xl">✅</div>
-                                    <p className="text-green-300 font-semibold text-sm">Material PDF Loaded ({materialPageCount} pages)</p>
+                                    <p className="text-green-300 font-semibold text-sm">Material Document Loaded ({materialPageCount} pages / slides)</p>
                                     <p className="text-white/40 text-xs">Click to replace</p>
                                 </div>
                             ) : (
                                 <div className="space-y-1">
                                     <div className="text-3xl">📤</div>
-                                    <p className="text-white/70 font-medium text-sm">Upload study material PDF</p>
+                                    <p className="text-white/70 font-medium text-sm">Upload study material (PDF, PPTX Slides, DOCX)</p>
                                     <p className="text-white/40 text-xs">Or paste text below</p>
                                 </div>
                             )}

@@ -728,23 +728,49 @@ function getAdaptiveContext(difficultySignal, scenarioNumber) {
 // ─── DYNAMIC ASSESSMENT ENDPOINTS ────────────────────────────────────────────
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB max
+const officeParser = require('officeparser');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } }); // 15MB max
 
-// Upload PDF → Extract text locally ($0 cost)
+// Upload Document (PDF, PPTX Slides, DOCX, TXT) → Extract text locally ($0 cost)
 app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No PDF file uploaded' });
+      return res.status(400).json({ success: false, error: 'No document file uploaded' });
     }
-    const data = await pdfParse(req.file.buffer);
+
+    const filename = (req.file.originalname || '').toLowerCase();
+    let extractedText = '';
+    let pageCount = 1;
+
+    if (filename.endsWith('.pptx') || filename.endsWith('.ppt') || filename.endsWith('.docx')) {
+      // Extract PowerPoint slides or Word docs using officeparser
+      extractedText = await officeParser.parseOfficeAsync(req.file.buffer);
+      const slideMatches = extractedText.match(/slide\s*\d+/gi);
+      pageCount = slideMatches ? slideMatches.length : Math.max(1, Math.ceil(extractedText.length / 500));
+    } else if (filename.endsWith('.txt')) {
+      extractedText = req.file.buffer.toString('utf8');
+      pageCount = 1;
+    } else {
+      // Default: pdf-parse for PDF documents and slides
+      try {
+        const data = await pdfParse(req.file.buffer);
+        extractedText = data.text;
+        pageCount = data.numpages || 1;
+      } catch {
+        // Fallback to officeParser if PDF has custom office formatting
+        extractedText = await officeParser.parseOfficeAsync(req.file.buffer);
+        pageCount = 1;
+      }
+    }
+
     res.json({
       success: true,
-      text: data.text,
-      pageCount: data.numpages,
+      text: extractedText,
+      pageCount,
     });
   } catch (err) {
-    console.error('PDF parse error:', err.message);
-    res.status(500).json({ success: false, error: 'Failed to parse PDF. Ensure it is a valid PDF file.' });
+    console.error('Document parse error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to parse file. Ensure it is a valid PDF, PPTX slides, or DOCX document.' });
   }
 });
 
