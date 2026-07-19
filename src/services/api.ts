@@ -275,3 +275,71 @@ export async function fetchRecordsByName(name: string): Promise<any[]> {
     }
     return response.json();
 }
+
+// ─── DYNAMIC ASSESSMENT API ──────────────────────────────────────────────────
+
+export async function uploadPdf(file: File): Promise<{ success: boolean; text?: string; pageCount?: number; error?: string }> {
+    const formData = new FormData();
+    formData.append('pdf', file);
+    try {
+        const token = getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const response = await fetch(`${API_BASE}/upload-pdf`, {
+            method: 'POST',
+            headers,
+            body: formData,
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error uploading PDF' };
+    }
+}
+
+export async function generateExam(config: {
+    materialText: string;
+    questionCount: number;
+    totalMarks: number;
+    difficulty: string;
+}): Promise<{ success: boolean; exam?: any; error?: string }> {
+    try {
+        const response = await fetch(`${API_BASE}/generate-exam`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(config),
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error generating exam' };
+    }
+}
+
+export async function parsePaper(text: string): Promise<{ success: boolean; exam?: any; error?: string }> {
+    try {
+        const response = await fetch(`${API_BASE}/parse-paper`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ text }),
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error parsing paper' };
+    }
+}
+
+export async function sendChatMessage(
+    messages: { role: string; content: string }[],
+    recordContext?: any
+): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+        const response = await fetch(`${API_BASE}/chat`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ messages, recordContext }),
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error communicating with AI Advisor' };
+    }
+}
+

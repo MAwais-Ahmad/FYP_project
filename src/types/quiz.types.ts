@@ -95,10 +95,12 @@ export type ScreenType =
     | 'auth'
     | 'user-dashboard'
     | 'quiz'
+    | 'custom-quiz'
     | 'inter-scenario'
     | 'results'
     | 'session-dashboard'
-    | 'record-detail';
+    | 'record-detail'
+    | 'assessment-setup';
 
 export type DifficultySignal = 'harder' | 'easier' | 'consistency_test';
 
@@ -155,4 +157,33 @@ export interface CategoryResult {
     secondary_emoji?: string;
     secondary_confidence?: number;
     category_blend: boolean;
+}
+
+// ─── DYNAMIC ASSESSMENT MODES ─────────────────────────────────────────────────
+
+export type AssessmentMode = 'ai-scenario' | 'custom-paper' | 'ai-material';
+
+export type ExamDifficulty = 'easy' | 'normal' | 'hard';
+
+export interface CustomExamQuestion {
+    id: number;
+    type: 'mcq';
+    marks: number;
+    question: string;
+    options: string[];
+    correctAnswer: string;
+    explanation?: string;
+}
+
+export interface ExamConfig {
+    materialText: string;
+    questionCount: number;
+    totalMarks: number;
+    difficulty: ExamDifficulty;
+}
+
+export interface GeneratedExam {
+    examTitle: string;
+    totalMarks: number;
+    questions: CustomExamQuestion[];
 }

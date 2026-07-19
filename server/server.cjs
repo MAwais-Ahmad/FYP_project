@@ -725,6 +725,160 @@ function getAdaptiveContext(difficultySignal, scenarioNumber) {
   return map[difficultySignal] || '';
 }
 
+// ─── DYNAMIC ASSESSMENT ENDPOINTS ────────────────────────────────────────────
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB max
+
+// Upload PDF → Extract text locally ($0 cost)
+app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No PDF file uploaded' });
+    }
+    const data = await pdfParse(req.file.buffer);
+    res.json({
+      success: true,
+      text: data.text,
+      pageCount: data.numpages,
+    });
+  } catch (err) {
+    console.error('PDF parse error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to parse PDF. Ensure it is a valid PDF file.' });
+  }
+});
+
+// Generate exam from material text using AI
+app.post('/api/generate-exam', async (req, res) => {
+  try {
+    const { materialText, questionCount = 10, totalMarks = 10, difficulty = 'normal' } = req.body;
+    if (!materialText || materialText.trim().length < 20) {
+      return res.status(400).json({ success: false, error: 'Please provide study material text (at least 20 characters).' });
+    }
+
+    const difficultyInstructions = {
+      easy: 'Focus 80% on direct recall, definitions, and basic facts. 20% on simple application. Questions should test surface-level understanding.',
+      normal: 'Balance 50% core concept questions with 50% application/scenario-based questions. Test both understanding and ability to apply knowledge.',
+      hard: 'Focus 20% on foundational constraints and 80% on critical analysis, multi-step reasoning, edge cases, and synthesis across topics. Questions should challenge deep understanding.',
+    };
+
+    const marksPerQuestion = Math.max(1, Math.round(totalMarks / questionCount));
+
+    const prompt = `You are an expert exam generator. Based on the following study material, generate exactly ${questionCount} multiple-choice questions (MCQs).
+
+DIFFICULTY LEVEL: ${difficulty.toUpperCase()}
+${difficultyInstructions[difficulty] || difficultyInstructions.normal}
+
+REQUIREMENTS:
+- Each question must have exactly 4 options labeled A, B, C, D.
+- Each question is worth ${marksPerQuestion} mark(s).
+- Total marks for the exam: ${totalMarks}.
+- Provide the correct answer letter and a brief explanation for each question.
+- Questions must be derived from the provided material only.
+- Vary question types: some factual recall, some application, some analysis (based on difficulty).
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "examTitle": "Generated Exam on [topic]",
+  "totalMarks": ${totalMarks},
+  "questions": [
+    {
+      "id": 1,
+      "type": "mcq",
+      "marks": ${marksPerQuestion},
+      "question": "Question text here?",
+      "options": ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
+      "correctAnswer": "A",
+      "explanation": "Brief explanation of why A is correct."
+    }
+  ]
+}
+
+STUDY MATERIAL:
+${materialText.substring(0, 12000)}`;
+
+    const response = await openai.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return res.status(500).json({ success: false, error: 'AI did not return a response.' });
+    }
+
+    const exam = JSON.parse(content);
+    totalTokensUsed += response.usage?.total_tokens || 0;
+    console.log(`✅ Generated exam: ${exam.examTitle} (${exam.questions?.length || 0} questions, ${totalMarks} marks, ${difficulty} difficulty)`);
+
+    res.json({ success: true, exam });
+  } catch (err) {
+    console.error('Generate exam error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to generate exam. Please try again.' });
+  }
+});
+
+// Parse an existing exam paper text into structured JSON
+app.post('/api/parse-paper', async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || text.trim().length < 20) {
+      return res.status(400).json({ success: false, error: 'Please provide exam paper text (at least 20 characters).' });
+    }
+
+    const prompt = `You are an expert exam parser. The following text is an exam paper. Extract all questions, options, correct answers, and marks from it.
+
+RULES:
+- Extract each question with its options (A, B, C, D).
+- If marks are specified per question (e.g., "[2 marks]"), use that value. Otherwise default to 1 mark per MCQ.
+- If the answer key is provided, extract correct answers. If not, set correctAnswer to "" (empty string).
+- Calculate the total marks from all questions.
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "examTitle": "Parsed Exam Paper",
+  "totalMarks": <number>,
+  "questions": [
+    {
+      "id": 1,
+      "type": "mcq",
+      "marks": 1,
+      "question": "Question text?",
+      "options": ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
+      "correctAnswer": "A",
+      "explanation": ""
+    }
+  ]
+}
+
+EXAM PAPER TEXT:
+${text.substring(0, 12000)}`;
+
+    const response = await openai.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return res.status(500).json({ success: false, error: 'AI did not return a response.' });
+    }
+
+    const exam = JSON.parse(content);
+    totalTokensUsed += response.usage?.total_tokens || 0;
+    console.log(`✅ Parsed paper: ${exam.examTitle} (${exam.questions?.length || 0} questions extracted)`);
+
+    res.json({ success: true, exam });
+  } catch (err) {
+    console.error('Parse paper error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to parse paper. Please try again.' });
+  }
+});
+
 // ─── GENERATE SCENARIO + QUESTIONS ───────────────────────────────────────────
 app.post('/api/generate-scenario', async (req, res) => {
   try {
@@ -1046,6 +1200,120 @@ Return JSON format:
       },
       usage: { tokens: 0, estimatedCost: 0 },
     });
+  }
+});
+
+// ─── AI TUTOR & INTELLIGENCE CHATBOT ENDPOINT ────────────────────────────────
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { messages = [], recordContext = null } = req.body;
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+
+    // Search database for student or exam queries (e.g. "Physics Test 1 Haris")
+    let databaseContextStr = '';
+    if (isDbConnected && lastUserMsg.length > 3) {
+      try {
+        const keywords = lastUserMsg.split(/\s+/).filter(w => w.length > 2);
+        if (keywords.length > 0) {
+          const dbRecords = await prisma.record.findMany({
+            take: 10,
+            orderBy: { date: 'desc' },
+            include: { user: true },
+          });
+
+          // Filter relevant records
+          const matching = dbRecords.filter(r => {
+            const studentName = (r.user?.name || '').toLowerCase();
+            const examTitle = (r.primaryName || '').toLowerCase();
+            const queryLower = lastUserMsg.toLowerCase();
+            return (
+              (studentName && queryLower.includes(studentName)) ||
+              (examTitle && queryLower.includes(examTitle)) ||
+              queryLower.includes('student') ||
+              queryLower.includes('class') ||
+              queryLower.includes('test') ||
+              queryLower.includes('result')
+            );
+          });
+
+          if (matching.length > 0) {
+            databaseContextStr = '\n\nDATABASE STUDENT RECORDS SUMMARY:\n' + matching.map(r => {
+              const name = r.user?.name || 'Anonymous Student';
+              const date = new Date(r.date).toLocaleDateString();
+              return `- Student: ${name} | Date: ${date} | Score: ${r.performanceScore}% | Category: ${r.primaryName} | Decision Style: ${r.decisionStyle} | Avg Time: ${r.avgResponseTime}s`;
+            }).join('\n');
+          }
+        }
+      } catch (err) {
+        console.log('Chat DB search error:', err.message);
+      }
+    }
+
+    const systemPrompt = `You are AITA Core AI — the official Intelligent Tutor & Diagnostic Assistant for the AITA (Adaptive Diagnostic & Cognitive Profiler) platform.
+
+YOUR RESPONSIBILITIES & PERSONA:
+1. Academic, encouraging, highly analytical AI tutor and teacher assistant.
+2. Explain cognitive profiles (Fast Learner, Strategic Thinker, Slow & Thorough, Steady Achiever, Quick & Careless, Inconsistent Performer, Concept Struggler, Ignorant/Avoider) based on accuracy, response speed, answer revisions, and confidence calibration.
+3. Help students understand test questions, core concepts, and why options are correct or incorrect.
+4. Assist teachers by looking up student results, summarizing performance in tests (e.g., "Physics Test 1"), and highlighting students who need support.
+5. STRICT GUARDRAIL: Speak authoritatively about AITA's advanced AI multi-dimensional diagnostic classification engine. NEVER mention internal fallback rules or technical system limitations. Speak with 100% confidence about the platform's features.
+
+FORMATTING:
+- Use bullet points, bold text, and clean GitHub-style markdown. Keep responses clear and concise.${recordContext ? `\n\nACTIVE TEST RESULT CONTEXT:\n${JSON.stringify(recordContext, null, 2)}` : ''}${databaseContextStr}`;
+
+    const apiMessages = [
+      { role: 'system', content: systemPrompt },
+      ...messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
+    ];
+
+    let reply = '';
+
+    // Attempt 1: OpenRouter Free API (if key present)
+    if (process.env.OPENROUTER_API_KEY) {
+      try {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://aita-platform.local',
+            'X-Title': 'AITA Platform',
+          },
+          body: JSON.stringify({
+            model: 'meta-llama/llama-3.3-70b-instruct:free',
+            messages: apiMessages,
+            temperature: 0.7,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          reply = data.choices?.[0]?.message?.content || '';
+        }
+      } catch (err) {
+        console.log('OpenRouter chat fallback to OpenAI:', err.message);
+      }
+    }
+
+    // Attempt 2: OpenAI Fallback
+    if (!reply && process.env.OPENAI_API_KEY) {
+      const response = await openai.chat.completions.create({
+        model: MODEL,
+        messages: apiMessages,
+        temperature: 0.7,
+      });
+      reply = response.choices?.[0]?.message?.content || '';
+      totalTokensUsed += response.usage?.total_tokens || 0;
+    }
+
+    if (!reply) {
+      reply = 'I am your AITA AI Tutor. I can help analyze your cognitive profile, explain specific question concepts, or summarize student results for teachers!';
+    }
+
+    res.json({ success: true, message: reply });
+  } catch (err) {
+    console.error('Chat endpoint error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to process chat message.' });
   }
 });
 

@@ -6,3 +6,6 @@ export { RecordDetail } from './screens/RecordDetail';
 export { QuizScreen } from './screens/QuizScreen';
 export { ResultsScreen } from './screens/ResultsScreen';
 export { InterScenarioScreen } from './screens/InterScenarioScreen';
+export { AssessmentSetupScreen } from './screens/AssessmentSetupScreen';
+export { CustomQuizScreen } from './screens/CustomQuizScreen';
+export { CustomResultsScreen } from './screens/CustomResultsScreen';
