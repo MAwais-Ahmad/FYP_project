@@ -114,3 +114,37 @@ export function buildRecord(
         scenarioResults,
     };
 }
+
+// Build a StudentRecord from a completed CUSTOM exam (MCQ/short/long). Custom
+// exams have no multi-scenario history, so scenarioResults is empty and the
+// headline metrics come straight from the graded result + classification.
+export function buildCustomRecord(
+    name: string,
+    category: CategoryResult,
+    cognitive: CognitiveFeatures,
+    overall: OverallMetrics,
+    accuracyScore: number,
+    confidence: number,
+): StudentRecord {
+    return {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: name.trim() || 'Anonymous',
+        date: new Date().toISOString(),
+        scenariosCompleted: 1,
+        primaryCategory: category.primary_category,
+        primaryName: category.primary_name,
+        primaryEmoji: category.primary_emoji,
+        primaryConfidence: category.primary_confidence,
+        secondaryCategory: category.secondary_category,
+        secondaryName: category.secondary_name,
+        confidence,
+        performanceScore: accuracyScore,
+        avgPerformanceScore: accuracyScore,
+        accuracyScore,
+        avgResponseTime: overall.avgResponseTime,
+        decisionStyle: overall.decisionStyle,
+        cognitive,
+        overall,
+        scenarioResults: [],
+    };
+}

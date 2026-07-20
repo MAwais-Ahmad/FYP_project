@@ -7,6 +7,13 @@ interface AssessmentSetupScreenProps {
     onStartCustomExam: (exam: GeneratedExam) => void;
     onBack: () => void;
     userName?: string;
+    // Session-authoring mode: the host is creating the paper for a session rather
+    // than taking it. Custom exams are handed to onAuthorCustomExam (saved to the
+    // session) and the AI Scenario card asks for a difficulty then calls
+    // onAuthorScenario, instead of starting the assessment.
+    sessionAuthor?: boolean;
+    onAuthorCustomExam?: (exam: GeneratedExam) => void;
+    onAuthorScenario?: (difficultyLevel: number) => void;
 }
 
 type SetupTab = 'select-mode' | 'custom-paper' | 'ai-material';
@@ -29,8 +36,21 @@ export function AssessmentSetupScreen({
     onStartCustomExam,
     onBack,
     userName,
+    sessionAuthor = false,
+    onAuthorCustomExam,
+    onAuthorScenario,
 }: AssessmentSetupScreenProps) {
     const [tab, setTab] = useState<SetupTab>('select-mode');
+
+    // AI-scenario difficulty picker (session authoring only)
+    const [scenarioDifficulty, setScenarioDifficulty] = useState(5);
+    const [showScenarioDifficulty, setShowScenarioDifficulty] = useState(false);
+
+    // Route a finished custom exam either to the session (author) or the taker.
+    const deliverCustomExam = (exam: GeneratedExam) => {
+        if (sessionAuthor && onAuthorCustomExam) onAuthorCustomExam(exam);
+        else onStartCustomExam(exam);
+    };
 
     // Custom Paper state
     const [customMode, setCustomMode] = useState<CustomPaperMode>('upload');
@@ -217,7 +237,7 @@ export function AssessmentSetupScreen({
             .map((q, i) => ({ ...q, id: i + 1 }));
         if (valid.length === 0) return;
         const total = valid.reduce((sum, q) => sum + q.marks, 0);
-        onStartCustomExam({
+        deliverCustomExam({
             examTitle: examTitle.trim() || 'Custom Paper',
             totalMarks: total,
             questions: valid,
@@ -227,7 +247,7 @@ export function AssessmentSetupScreen({
     // ─── Preview & Start ───
     const handleStartPreviewExam = () => {
         if (previewExam) {
-            onStartCustomExam(previewExam);
+            deliverCustomExam(previewExam);
         }
     };
 
@@ -306,7 +326,7 @@ export function AssessmentSetupScreen({
                             onClick={handleStartPreviewExam}
                             className="btn-primary !py-3 !px-8 text-lg"
                         >
-                            🚀 Start Exam
+                            {sessionAuthor ? '✅ Use This Paper for Session' : '🚀 Start Exam'}
                         </button>
                     </div>
                 </div>
@@ -333,17 +353,22 @@ export function AssessmentSetupScreen({
                             <span className="text-4xl">📝</span>
                         </div>
                         <h1 className="text-3xl md:text-4xl font-extrabold bg-gradient-to-r from-white to-primary-200 bg-clip-text text-transparent">
-                            Choose Assessment Mode
+                            {sessionAuthor ? 'Create Session Assessment' : 'Choose Assessment Mode'}
                         </h1>
-                        {userName && (
-                            <p className="text-white/50 text-sm">Welcome, {userName}</p>
-                        )}
+                        <p className="text-white/50 text-sm">
+                            {sessionAuthor
+                                ? 'Build the paper every participant in this session will take.'
+                                : userName ? `Welcome, ${userName}` : ''}
+                        </p>
                     </div>
 
                     <div className="grid gap-4">
                         {/* General AI Scenario */}
                         <button
-                            onClick={onStartAIScenario}
+                            onClick={() => {
+                                if (sessionAuthor) setShowScenarioDifficulty(true);
+                                else onStartAIScenario();
+                            }}
                             className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-primary-500/30"
                         >
                             <div className="flex items-start gap-4">
@@ -351,10 +376,10 @@ export function AssessmentSetupScreen({
                                 <div className="space-y-1">
                                     <h3 className="font-bold text-xl">General AI Scenario</h3>
                                     <p className="text-white/50 text-sm leading-relaxed">
-                                        AI generates interactive dilemmas with sliders, rankings, and MCQs. Measures cognitive profile through behavioral telemetry across multiple rounds.
+                                        AI generates interactive dilemmas with sliders, rankings, and MCQs. Measures cognitive profile through behavioral telemetry.
                                     </p>
                                     <span className="inline-block text-xs bg-primary-500/20 text-primary-300 px-2 py-0.5 rounded-full mt-1">
-                                        Existing Flow
+                                        {sessionAuthor ? 'One shared scenario for all' : 'Existing Flow'}
                                     </span>
                                 </div>
                             </div>
@@ -399,6 +424,43 @@ export function AssessmentSetupScreen({
                         </button>
                     </div>
                 </div>
+
+                {/* AI Scenario difficulty picker (session authoring) */}
+                {showScenarioDifficulty && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
+                        <div className="glass-card max-w-md w-full p-8 space-y-5 border border-white/10 shadow-2xl">
+                            <div className="text-center space-y-1">
+                                <div className="text-4xl">🧠</div>
+                                <h2 className="text-xl font-bold">Scenario Difficulty</h2>
+                                <p className="text-white/50 text-sm">Pick the challenge level for the shared scenario.</p>
+                            </div>
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-sm text-white/70">Difficulty</label>
+                                    <span className="text-lg font-bold text-primary-300">{scenarioDifficulty}/10</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min={1}
+                                    max={10}
+                                    value={scenarioDifficulty}
+                                    onChange={(e) => setScenarioDifficulty(parseInt(e.target.value))}
+                                    className="w-full accent-primary-500"
+                                />
+                                <div className="flex justify-between text-xs text-white/30"><span>Easy</span><span>Expert</span></div>
+                            </div>
+                            <div className="flex gap-3 justify-end">
+                                <button onClick={() => setShowScenarioDifficulty(false)} className="btn-secondary !py-2.5 !px-5">Cancel</button>
+                                <button
+                                    onClick={() => { setShowScenarioDifficulty(false); onAuthorScenario?.(scenarioDifficulty); }}
+                                    className="btn-primary !py-2.5 !px-6"
+                                >
+                                    ✅ Create for Session
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </section>
         );
     }
@@ -655,7 +717,7 @@ export function AssessmentSetupScreen({
                                     disabled={manualQuestions.filter(q => q.question.trim()).length === 0}
                                     className="btn-primary !py-2.5 !px-6 disabled:opacity-50"
                                 >
-                                    🚀 Start Exam
+                                    {sessionAuthor ? '✅ Use for Session' : '🚀 Start Exam'}
                                 </button>
                             </div>
                         </div>

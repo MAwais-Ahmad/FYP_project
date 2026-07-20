@@ -24,6 +24,7 @@ interface ResultsScreenProps {
     totalCost: number;
     onRestart: () => void;
     onViewDashboard?: () => void;
+    sessionId?: string | null;
 }
 
 // ─── MAIN COMPONENT ────────────────────────────────────────────────────────────
@@ -38,6 +39,7 @@ export function ResultsScreen({
     totalCost,
     onRestart,
     onViewDashboard,
+    sessionId,
 }: ResultsScreenProps) {
     const [categoryResult, setCategoryResult] = useState<CategoryResult | null>(null);
     const savedRef = useRef(false);
@@ -63,7 +65,9 @@ export function ResultsScreen({
                 savedRef.current = true;
                 const record = buildRecord(studentName, result, scenarioResults, overall);
                 addRecord(record);
-                saveRecord(record).catch(err => {
+                // Attach sessionId when this run is part of a session so the server
+                // links the record to the host's session results.
+                saveRecord(sessionId ? { ...record, sessionId } : record).catch(err => {
                     console.error("Database save failed. Record is preserved in local storage:", err.message);
                 });
             }

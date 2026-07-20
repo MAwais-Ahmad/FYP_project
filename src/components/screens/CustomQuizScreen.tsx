@@ -6,6 +6,7 @@ interface CustomQuizScreenProps {
     exam: GeneratedExam;
     onComplete: (results: CustomExamResults) => void;
     onBack: () => void;
+    sessionId?: string | null;
 }
 
 export interface CustomExamResults {
@@ -26,7 +27,7 @@ export interface CustomExamResults {
     shortMarks: number;
 }
 
-export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenProps) {
+export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: CustomQuizScreenProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
     const [questionTimes, setQuestionTimes] = useState<Record<number, number>>({});
@@ -103,8 +104,11 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
         // examId → leak-free stored exam; otherwise send the (manual) exam inline.
         const resp = await gradeExam({
             examId: exam.examId,
-            exam: exam.examId ? undefined : exam,
+            // For a session exam the server loads the paper from the session; for a
+            // manual/solo exam without an examId, send it inline.
+            exam: exam.examId || sessionId ? undefined : exam,
             answers: selectedAnswers,
+            sessionId,
         });
 
         if (!resp.success || !resp.result) {

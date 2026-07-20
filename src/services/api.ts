@@ -363,6 +363,7 @@ export async function gradeExam(payload: {
     examId?: string;
     exam?: any;
     answers: Record<number, string | string[]>;
+    sessionId?: string | null;
 }): Promise<{ success: boolean; result?: any; error?: string }> {
     return safeApiJson(`${API_BASE}/grade-exam`, {
         method: 'POST',

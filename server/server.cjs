@@ -9,7 +9,7 @@ const { PrismaClient } = require('@prisma/client');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const OPENROUTER_MODEL = 'google/gemma-2-9b-it:free';
+const OPENROUTER_MODEL = 'openrouter/auto';
 const OPENAI_MODEL = 'gpt-4o-mini';
 
 const openrouterClient = process.env.OPENROUTER_API_KEY
@@ -688,8 +688,15 @@ app.get('/api/sessions/:id/view', requireAuth, async (req, res) => {
         joined: !!myMembership,
         completed: !!(myMembership && myMembership.recordId),
         recordId: myMembership ? myMembership.recordId : null,
+        record: null,
       },
     };
+
+    // Include the caller's OWN record so a participant can re-view their result
+    // (participants only ever see their own, never the whole session).
+    if (myMembership && myMembership.recordId) {
+      payload.me.record = await prisma.record.findUnique({ where: { id: myMembership.recordId } });
+    }
 
     if (isHost) {
       const memberRecordIds = session.members.filter(m => m.recordId).map(m => m.recordId);

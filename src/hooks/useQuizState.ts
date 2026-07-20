@@ -72,6 +72,10 @@ export function useQuizState() {
     // Student identity (for dashboards / persistence)
     const [studentName, setStudentName] = useState('');
 
+    // Session mode: taking a host-authored single scenario. When true, completing
+    // the scenario goes straight to results (no multi-round inter-scenario step).
+    const [sessionMode, setSessionMode] = useState(false);
+
     // Cost tracking
     const [tokensUsed, setTokensUsed] = useState(0);
     const [totalCost, setTotalCost] = useState(0);
@@ -110,6 +114,7 @@ export function useQuizState() {
     // ── START (from welcome screen with chosen difficulty) ─────────────────────
     const startQuiz = useCallback(async (chosenDifficulty: number, name?: string) => {
         if (name !== undefined) setStudentName(name);
+        setSessionMode(false);
         setCurrentScenarioNumber(1);
         setDifficultyLevel(chosenDifficulty);
         setScenarioResults([]);
@@ -118,6 +123,24 @@ export function useQuizState() {
         await loadScenario(chosenDifficulty, 1);
         setScreen('quiz');
     }, [loadScenario]);
+
+    // ── START A PRESET SCENARIO (host-authored session paper) ──────────────────
+    // Loads a fixed scenario every participant shares — single round, no generation.
+    const startPresetScenario = useCallback(
+        (presetScenario: Scenario, presetQuestions: Question[], level: number, name?: string) => {
+            if (name !== undefined) setStudentName(name);
+            setSessionMode(true);
+            setCurrentScenarioNumber(1);
+            setDifficultyLevel(level || 5);
+            setScenarioResults([]);
+            setAnswers({});
+            setCurrentQuestionIndex(0);
+            setScenario(presetScenario);
+            setQuestions(presetQuestions);
+            setScreen('quiz');
+        },
+        []
+    );
 
     // ── DASHBOARD NAVIGATION ──────────────────────────────────────────────────
     const goToWelcome = useCallback(() => setScreen('welcome'), []);
@@ -179,7 +202,7 @@ export function useQuizState() {
                 };
 
                 setScenarioResults(prev => [...prev, result]);
-                setScreen('inter-scenario');
+                setScreen(sessionMode ? 'results' : 'inter-scenario');
             } catch (error) {
                 console.error("Failed to evaluate scenario:", error);
                 // Fallback result if API fails — use client-side heuristics, not flat 0.5s
@@ -215,12 +238,12 @@ export function useQuizState() {
                     questionsMetrics: qMetrics ? { ...qMetrics } : undefined,
                 };
                 setScenarioResults(prev => [...prev, result]);
-                setScreen('inter-scenario');
+                setScreen(sessionMode ? 'results' : 'inter-scenario');
             } finally {
                 setIsLoading(false);
             }
         },
-        [currentScenarioNumber, scenario, questions, difficultyLevel, answers, isLoading]
+        [currentScenarioNumber, scenario, questions, difficultyLevel, answers, isLoading, sessionMode]
     );
 
     // ── CONTINUE TO NEXT ROUND (user chose new difficulty) ────────────────────
@@ -293,6 +316,7 @@ export function useQuizState() {
         setCurrentScenarioNumber(1);
         setDifficultyLevel(5);
         setScenarioResults([]);
+        setSessionMode(false);
     }, []);
 
     const addCost = useCallback((tokens: number, cost: number) => {
@@ -318,6 +342,7 @@ export function useQuizState() {
         totalCost,
 
         startQuiz,
+        startPresetScenario,
         completeScenario,
         proceedToNextScenario,
         finishAssessment,

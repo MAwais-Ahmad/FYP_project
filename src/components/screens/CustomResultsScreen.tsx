@@ -1,14 +1,19 @@
+import { useEffect, useRef } from 'react';
 import { CustomExamResults } from './CustomQuizScreen';
 import { classifyLearner, LEARNER_CATEGORIES, heuristicCognitiveFeatures, calculateDynamicConfidence } from '../../utils/classifyLearner';
 import { OverallMetrics } from '../../types/quiz.types';
+import { addRecord, buildCustomRecord } from '../../utils/storage';
+import { saveRecord } from '../../services/api';
 
 interface CustomResultsScreenProps {
     results: CustomExamResults;
     onRestart: () => void;
     onViewDashboard?: () => void;
+    studentName?: string;
+    sessionId?: string | null;
 }
 
-export function CustomResultsScreen({ results, onRestart, onViewDashboard }: CustomResultsScreenProps) {
+export function CustomResultsScreen({ results, onRestart, onViewDashboard, studentName, sessionId }: CustomResultsScreenProps) {
     const {
         examTitle, totalMarks, obtainedMarks, percentage, totalTime, avgTimePerQuestion,
         questions, graded, selectedAnswers, questionTimes, revisionCounts, totalRevisions,
@@ -93,6 +98,27 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
 
     const cognitiveInsight = categoryResult.primary_name;
     const insightEmoji = categoryResult.primary_emoji;
+
+    // Persist this custom-exam result exactly once — to localStorage (personal
+    // dashboard) and to the server. When taken as part of a session, sessionId is
+    // included so the host's session results pick it up.
+    const savedRef = useRef(false);
+    useEffect(() => {
+        if (savedRef.current) return;
+        savedRef.current = true;
+        const record = buildCustomRecord(
+            studentName || 'Anonymous',
+            categoryResult,
+            cognitive,
+            overallMetrics,
+            accuracyScore,
+            confidence,
+        );
+        addRecord(record);
+        saveRecord(sessionId ? { ...record, sessionId } : record).catch(err => {
+            console.error('Record save failed (kept in local storage):', err?.message || err);
+        });
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const scoreColor = percentage >= 70 ? 'text-green-400' : percentage >= 50 ? 'text-yellow-400' : 'text-red-400';
     const scoreBg = percentage >= 70 ? 'from-green-500/20 to-green-500/5' : percentage >= 50 ? 'from-yellow-500/20 to-yellow-500/5' : 'from-red-500/20 to-red-500/5';

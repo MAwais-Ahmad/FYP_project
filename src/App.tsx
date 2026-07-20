@@ -15,7 +15,7 @@ import {
 import { AIChatDrawer } from './components/ui/AIChatDrawer';
 import { CustomExamResults } from './components/screens/CustomQuizScreen';
 import { useQuizState, useMetrics } from './hooks';
-import { AuthUser, getMe, logout as apiLogout } from './services/api';
+import { AuthUser, getMe, logout as apiLogout, setSessionAssessment, getSessionAssessment, generateScenario } from './services/api';
 import { StudentRecord } from './utils/storage';
 import { GeneratedExam } from './types/quiz.types';
 
@@ -25,6 +25,10 @@ function App() {
     const [authChecked, setAuthChecked] = useState(false);
     const [selectedRecord, setSelectedRecord] = useState<StudentRecord | null>(null);
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+    // True while the host is AUTHORING a session's assessment (vs taking one).
+    const [authoringSession, setAuthoringSession] = useState(false);
+    const [sessionBusy, setSessionBusy] = useState(false);
+    const [sessionError, setSessionError] = useState('');
 
     // Dynamic Assessment state
     const [customExam, setCustomExam] = useState<GeneratedExam | null>(null);
@@ -45,6 +49,7 @@ function App() {
         tokensUsed,
         totalCost,
         startQuiz,
+        startPresetScenario,
         completeScenario,
         proceedToNextScenario,
         finishAssessment,
@@ -143,12 +148,80 @@ function App() {
         setScreen('assessment-setup');
     };
 
-    const handleStartSessionTest = (sessionId: string) => {
+    // ── SESSION: host authors the assessment ──────────────────────────────────
+    const handleCreateAssessment = (sessionId: string) => {
         setActiveSessionId(sessionId);
+        setAuthoringSession(true);
+        setSessionError('');
         setScreen('assessment-setup');
     };
 
-    // AI Scenario flow (existing)
+    // Host finished building a custom exam → save it as the session's paper.
+    const handleAuthorCustomExam = async (exam: GeneratedExam) => {
+        if (!activeSessionId) return;
+        setSessionBusy(true);
+        setSessionError('');
+        const payload = exam.examId
+            ? { kind: 'custom-exam', examId: exam.examId }
+            : { kind: 'custom-exam', exam };
+        const res = await setSessionAssessment(activeSessionId, payload);
+        setSessionBusy(false);
+        if (res.success) {
+            setAuthoringSession(false);
+            setScreen('session-dashboard');
+        } else {
+            setSessionError(res.error || 'Failed to save the session assessment');
+        }
+    };
+
+    // Host chose AI Scenario → generate one shared scenario, save it to the session.
+    const handleAuthorScenario = async (difficultyLevel: number) => {
+        if (!activeSessionId) return;
+        setSessionBusy(true);
+        setSessionError('');
+        try {
+            const gen = await generateScenario(undefined, 1, difficultyLevel, []);
+            if (!gen.success) throw new Error(gen.message || 'Scenario generation failed');
+            const res = await setSessionAssessment(activeSessionId, {
+                kind: 'ai-scenario',
+                scenario: gen.scenario,
+                questions: gen.questions,
+                difficultyLevel,
+            });
+            if (!res.success) throw new Error(res.error || 'Failed to save the scenario');
+            setAuthoringSession(false);
+            setScreen('session-dashboard');
+        } catch (err: any) {
+            setSessionError(err?.message || 'Failed to create the scenario assessment');
+        } finally {
+            setSessionBusy(false);
+        }
+    };
+
+    // ── SESSION: host or participant TAKES the authored assessment ─────────────
+    const handleTakeAssessment = async (sessionId: string) => {
+        setActiveSessionId(sessionId);
+        setSessionBusy(true);
+        setSessionError('');
+        const res = await getSessionAssessment(sessionId);
+        setSessionBusy(false);
+        if (!res.success || !res.assessment) {
+            setSessionError(res.error || 'The assessment is not available yet.');
+            return;
+        }
+        const a = res.assessment;
+        if (a.kind === 'custom-exam' && a.exam) {
+            setCustomExam(a.exam); // stripped (no answer key); graded server-side via sessionId
+            setScreen('custom-quiz');
+        } else if (a.kind === 'ai-scenario') {
+            startMetrics();
+            startPresetScenario(a.scenario, a.questions, a.difficultyLevel || 5, currentUser?.name);
+        } else {
+            setSessionError('This assessment type is not supported.');
+        }
+    };
+
+    // AI Scenario flow (existing, solo)
     const handleStartAIScenario = () => {
         goToWelcome();
     };
@@ -178,6 +251,7 @@ function App() {
     const handleRestart = () => {
         resetMetrics();
         setActiveSessionId(null);
+        setAuthoringSession(false);
         setCustomExam(null);
         setCustomExamResults(null);
         if (currentUser) {
@@ -192,6 +266,8 @@ function App() {
     // test lands back on the session dashboard, not a generic one.
     const handleExitQuiz = () => {
         resetMetrics();
+        setAuthoringSession(false);
+        setCustomExam(null);
         restartQuiz();
         if (activeSessionId) {
             setScreen('session-dashboard');
@@ -316,7 +392,11 @@ function App() {
                 <AssessmentSetupScreen
                     onStartAIScenario={handleStartAIScenario}
                     onStartCustomExam={handleStartCustomExam}
+                    sessionAuthor={authoringSession}
+                    onAuthorCustomExam={handleAuthorCustomExam}
+                    onAuthorScenario={handleAuthorScenario}
                     onBack={() => {
+                        setAuthoringSession(false);
                         if (activeSessionId) {
                             setScreen('session-dashboard');
                         } else if (currentUser) {
@@ -329,6 +409,28 @@ function App() {
                 />
             )}
 
+            {/* Session busy / error overlay (authoring or loading an assessment) */}
+            {(sessionBusy || sessionError) && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
+                    <div className="glass-card max-w-md w-full p-8 text-center space-y-4 border border-white/10 shadow-2xl">
+                        {sessionBusy ? (
+                            <>
+                                <div className="text-5xl animate-spin">🤖</div>
+                                <h2 className="text-xl font-bold">Working…</h2>
+                                <p className="text-white/60 text-sm">Preparing the session assessment. This can take a few seconds.</p>
+                            </>
+                        ) : (
+                            <>
+                                <div className="text-5xl">⚠️</div>
+                                <h2 className="text-xl font-bold">Something went wrong</h2>
+                                <p className="text-white/60 text-sm">{sessionError}</p>
+                                <button onClick={() => setSessionError('')} className="btn-primary !py-2.5 !px-6">OK</button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Session Dashboard */}
             {screen === 'session-dashboard' && currentUser && activeSessionId && (
                 <SessionDashboard
@@ -336,7 +438,8 @@ function App() {
                     user={currentUser}
                     onBack={handleBackFromSession}
                     onViewRecord={handleViewRecord}
-                    onStartSessionTest={handleStartSessionTest}
+                    onCreateAssessment={handleCreateAssessment}
+                    onTakeAssessment={handleTakeAssessment}
                 />
             )}
 
@@ -407,6 +510,7 @@ function App() {
                             ? () => setScreen('user-dashboard')
                             : undefined
                     }
+                    sessionId={activeSessionId}
                 />
             )}
 
@@ -415,7 +519,8 @@ function App() {
                 <CustomQuizScreen
                     exam={customExam}
                     onComplete={handleCustomExamComplete}
-                    onBack={handleRestart}
+                    onBack={handleExitQuiz}
+                    sessionId={activeSessionId}
                 />
             )}
 
@@ -429,6 +534,8 @@ function App() {
                             ? () => setScreen('user-dashboard')
                             : undefined
                     }
+                    studentName={currentUser?.name}
+                    sessionId={activeSessionId}
                 />
             )}
 
