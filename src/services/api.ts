@@ -219,6 +219,31 @@ export async function deleteSession(sessionId: string): Promise<{ success: boole
     });
 }
 
+// Role-aware session view (host or member): status, whether the host has created
+// the assessment yet, the caller's own progress, and (host only) all participants.
+export async function getSessionView(sessionId: string): Promise<any> {
+    return safeApiJson(`${API_BASE}/sessions/${sessionId}/view`, {
+        headers: authHeaders(),
+    });
+}
+
+// Host attaches the single assessment everyone will take.
+// payload: { kind: 'custom-exam', examId } | { kind:'custom-exam', exam } | { kind:'ai-scenario', scenario, questions, difficultyLevel }
+export async function setSessionAssessment(sessionId: string, payload: any): Promise<{ success: boolean; kind?: string; assessment?: any; error?: string }> {
+    return safeApiJson(`${API_BASE}/sessions/${sessionId}/assessment`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(payload),
+    });
+}
+
+// Fetch the (answer-key-stripped) assessment to take or preview. 404 while none.
+export async function getSessionAssessment(sessionId: string): Promise<{ success: boolean; assessment?: any; error?: string }> {
+    return safeApiJson(`${API_BASE}/sessions/${sessionId}/assessment`, {
+        headers: authHeaders(),
+    });
+}
+
 // ─── EXISTING API (with auth headers injected) ──────────────────────────────
 
 interface GenerateScenarioResponse {

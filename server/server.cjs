@@ -544,6 +544,178 @@ app.delete('/api/sessions/:id', requireAuth, async (req, res) => {
   }
 });
 
+// ─── SESSION ASSESSMENT (host-authored paper every participant takes) ─────────
+
+// Remove answer keys from a stored session assessment before sending to a client
+// (participants must never see correct answers before submitting). AI-scenario
+// questions have no answer key, so they pass through unchanged.
+function stripSessionAssessment(assessment) {
+  if (!assessment) return null;
+  if (assessment.kind === 'custom-exam' && assessment.exam) {
+    return {
+      kind: 'custom-exam',
+      exam: {
+        examTitle: assessment.exam.examTitle,
+        totalMarks: assessment.exam.totalMarks,
+        questions: (assessment.exam.questions || []).map(q => ({
+          id: q.id,
+          type: q.type,
+          marks: q.marks,
+          question: q.question,
+          options: q.options || [],
+        })),
+      },
+    };
+  }
+  if (assessment.kind === 'ai-scenario') {
+    return { kind: 'ai-scenario', scenario: assessment.scenario, questions: assessment.questions };
+  }
+  return null;
+}
+
+// Host creates (or replaces) the single assessment every participant will take.
+app.post('/api/sessions/:id/assessment', requireAuth, async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({ where: { id: req.params.id } });
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+    if (session.hostId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Only the host can set the assessment' });
+    }
+
+    const { kind } = req.body;
+    let assessment = null;
+
+    if (kind === 'custom-exam') {
+      // Resolve the FULL exam (with answer key): from the server-side exam store
+      // (AI-generated / parsed) or from an inline manually-authored exam.
+      const { examId, exam: inlineExam } = req.body;
+      let fullExam = null;
+      if (examId && examStore.has(examId)) {
+        fullExam = examStore.get(examId).exam;
+      } else if (inlineExam && Array.isArray(inlineExam.questions)) {
+        fullExam = {
+          examTitle: inlineExam.examTitle || session.title,
+          questions: normalizeExamQuestions(inlineExam.questions, { reorder: false }),
+          totalMarks: 0,
+        };
+      }
+      if (!fullExam || !fullExam.questions || fullExam.questions.length === 0) {
+        return res.status(400).json({ success: false, error: 'No valid exam was provided to attach.' });
+      }
+      fullExam.totalMarks = fullExam.questions.reduce((s, q) => s + q.marks, 0);
+      assessment = { kind: 'custom-exam', exam: fullExam, createdAt: new Date().toISOString() };
+    } else if (kind === 'ai-scenario') {
+      const { scenario, questions, difficultyLevel } = req.body;
+      if (!scenario || !Array.isArray(questions) || questions.length === 0) {
+        return res.status(400).json({ success: false, error: 'A generated scenario with questions is required.' });
+      }
+      assessment = { kind: 'ai-scenario', scenario, questions, difficultyLevel: difficultyLevel || 5, createdAt: new Date().toISOString() };
+    } else {
+      return res.status(400).json({ success: false, error: 'Unknown assessment kind.' });
+    }
+
+    await prisma.session.update({ where: { id: session.id }, data: { assessment } });
+    console.log(`📝 Session ${session.code} assessment set (${kind}) by ${req.user.name}`);
+    res.json({ success: true, kind, assessment: stripSessionAssessment(assessment) });
+  } catch (error) {
+    console.error('❌ Set session assessment error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to save the session assessment' });
+  }
+});
+
+// Host OR a joined member fetches the (answer-key-stripped) assessment to take or
+// preview. 404 while the host hasn't created it yet (participants "wait").
+app.get('/api/sessions/:id/assessment', requireAuth, async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: { members: { select: { userId: true } } },
+    });
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+    const isHost = session.hostId === req.user.id;
+    const isMember = session.members.some(m => m.userId === req.user.id);
+    if (!isHost && !isMember) {
+      return res.status(403).json({ success: false, error: 'You are not part of this session' });
+    }
+    if (!session.assessment) {
+      return res.status(404).json({ success: false, error: 'No assessment has been created for this session yet.' });
+    }
+    res.json({ success: true, assessment: stripSessionAssessment(session.assessment) });
+  } catch (error) {
+    console.error('❌ Get session assessment error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to load the session assessment' });
+  }
+});
+
+// Role-aware session view for host AND members: status, whether an assessment
+// exists, the caller's own progress, and (host only) the full participant list.
+app.get('/api/sessions/:id/view', requireAuth, async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: {
+        host: { select: { id: true, name: true } },
+        members: { include: { user: { select: { id: true, name: true, email: true } } } },
+      },
+    });
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+    const isHost = session.hostId === req.user.id;
+    const myMembership = session.members.find(m => m.userId === req.user.id);
+    if (!isHost && !myMembership) {
+      return res.status(403).json({ success: false, error: 'You are not part of this session' });
+    }
+
+    const payload = {
+      success: true,
+      isHost,
+      hasAssessment: !!session.assessment,
+      assessmentKind: session.assessment ? session.assessment.kind : null,
+      session: {
+        id: session.id,
+        code: session.code,
+        title: session.title,
+        isActive: session.isActive,
+        createdAt: session.createdAt,
+        host: session.host,
+      },
+      me: {
+        joined: !!myMembership,
+        completed: !!(myMembership && myMembership.recordId),
+        recordId: myMembership ? myMembership.recordId : null,
+      },
+    };
+
+    if (isHost) {
+      const memberRecordIds = session.members.filter(m => m.recordId).map(m => m.recordId);
+      const records = await prisma.record.findMany({
+        where: { id: { in: memberRecordIds } },
+        include: { user: { select: { id: true, name: true } } },
+      });
+      const recordMap = {};
+      records.forEach(r => { recordMap[r.id] = r; });
+      payload.members = session.members.map(m => ({
+        id: m.id,
+        user: m.user,
+        joinedAt: m.joinedAt,
+        recordId: m.recordId,
+        record: m.recordId ? recordMap[m.recordId] || null : null,
+        status: m.recordId ? 'completed' : 'in-progress',
+      }));
+    }
+
+    res.json(payload);
+  } catch (error) {
+    console.error('❌ Session view error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to load session' });
+  }
+});
+
 // ─── SCENARIO FORMATS (11 formats — far beyond just budget allocation!) ───────
 const scenarioFormats = [
   {
@@ -1203,14 +1375,22 @@ ${text.substring(0, 12000)}`;
 // one cumulative AI call, which also yields cognitive features for the profile.
 app.post('/api/grade-exam', async (req, res) => {
   try {
-    const { examId, exam: inlineExam, answers = {} } = req.body;
+    const { examId, exam: inlineExam, answers = {}, sessionId } = req.body;
 
-    // Prefer the server-side stored exam (leak-free path); fall back to an inline
-    // exam for manually-authored papers the client created itself.
+    // Resolve the FULL exam (with answer key):
+    //  1. A session paper (persisted on the Session) when grading a session exam,
+    //  2. the server-side stored exam (leak-free AI-generated path),
+    //  3. an inline manually-authored exam the client created itself.
     let fullExam = null;
-    if (examId && examStore.has(examId)) {
+    if (sessionId) {
+      const s = await prisma.session.findUnique({ where: { id: sessionId } });
+      if (s && s.assessment && s.assessment.kind === 'custom-exam') {
+        fullExam = s.assessment.exam;
+      }
+    }
+    if (!fullExam && examId && examStore.has(examId)) {
       fullExam = examStore.get(examId).exam;
-    } else if (inlineExam && Array.isArray(inlineExam.questions)) {
+    } else if (!fullExam && inlineExam && Array.isArray(inlineExam.questions)) {
       // Inline (manual) exam: preserve the client's question ids so they keep
       // matching the answers keyed by those ids.
       fullExam = { ...inlineExam, questions: normalizeExamQuestions(inlineExam.questions, { reorder: false }) };
