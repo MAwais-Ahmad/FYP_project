@@ -170,6 +170,14 @@ export async function toggleSession(sessionId: string, isActive?: boolean): Prom
     return response.json();
 }
 
+export async function deleteSession(sessionId: string): Promise<{ success: boolean; error?: string }> {
+    const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+    });
+    return response.json();
+}
+
 // ─── EXISTING API (with auth headers injected) ──────────────────────────────
 
 interface GenerateScenarioResponse {
@@ -207,12 +215,6 @@ interface EvaluateScenarioResponse {
     evaluation: {
         accuracy_score: number;
         cognitive_features: CognitiveFeatures;
-        vark?: {
-            visual: number;
-            auditory: number;
-            readWrite: number;
-            kinesthetic: number;
-        };
     };
     usage: {
         tokens: number;
@@ -275,3 +277,93 @@ export async function fetchRecordsByName(name: string): Promise<any[]> {
     }
     return response.json();
 }
+
+// ─── DYNAMIC ASSESSMENT API ──────────────────────────────────────────────────
+
+export async function uploadPdf(
+    files: File | File[]
+): Promise<{ success: boolean; text?: string; pageCount?: number; fileCount?: number; failedFiles?: string[]; error?: string }> {
+    const formData = new FormData();
+    const list = Array.isArray(files) ? files : [files];
+    list.forEach(f => formData.append('pdf', f));
+    try {
+        const token = getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const response = await fetch(`${API_BASE}/upload-pdf`, {
+            method: 'POST',
+            headers,
+            body: formData,
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error uploading document(s)' };
+    }
+}
+
+export async function generateExam(config: {
+    materialText: string;
+    mcqCount: number;
+    shortCount: number;
+    longCount: number;
+    totalMarks: number;
+    difficulty: string;
+}): Promise<{ success: boolean; exam?: any; error?: string }> {
+    try {
+        const response = await fetch(`${API_BASE}/generate-exam`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(config),
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error generating exam' };
+    }
+}
+
+export async function gradeExam(payload: {
+    examId?: string;
+    exam?: any;
+    answers: Record<number, string | string[]>;
+}): Promise<{ success: boolean; result?: any; error?: string }> {
+    try {
+        const response = await fetch(`${API_BASE}/grade-exam`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(payload),
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error grading exam' };
+    }
+}
+
+export async function parsePaper(text: string): Promise<{ success: boolean; exam?: any; error?: string }> {
+    try {
+        const response = await fetch(`${API_BASE}/parse-paper`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ text }),
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error parsing paper' };
+    }
+}
+
+export async function sendChatMessage(
+    messages: { role: string; content: string }[],
+    recordContext?: any
+): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+        const response = await fetch(`${API_BASE}/chat`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ messages, recordContext }),
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error communicating with AI Advisor' };
+    }
+}
+

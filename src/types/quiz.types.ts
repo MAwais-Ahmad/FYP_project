@@ -19,7 +19,7 @@ export interface Scenario {
     totalTimeLimit?: number;
 }
 
-export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection' | 'slider' | 'vark';
+export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection' | 'slider';
 
 export interface Question {
     id: number;
@@ -30,18 +30,12 @@ export interface Question {
     question: string;
     hint?: string;
     options?: string[];
-    varkMapping?: string[];
     context?: string;
     urgentUpdate?: string;
     // Slider specific properties
     min?: number;
     max?: number;
     unit?: string;
-    // Aptitude-test properties
-    category?: 'math' | 'verbal' | 'logical' | 'gk' | 'visual';
-    svg?: string; // inline SVG diagram (visual questions)
-    correctAnswer?: string; // MCQ: the correct letter ("A".."E"); text: canonical answer
-    accept?: string[]; // text questions: additional accepted answers
 }
 
 export interface QuestionMetrics {
@@ -100,10 +94,12 @@ export type ScreenType =
     | 'auth'
     | 'user-dashboard'
     | 'quiz'
+    | 'custom-quiz'
     | 'inter-scenario'
     | 'results'
     | 'session-dashboard'
-    | 'record-detail';
+    | 'record-detail'
+    | 'assessment-setup';
 
 export type DifficultySignal = 'harder' | 'easier' | 'consistency_test';
 
@@ -132,15 +128,10 @@ export interface ScenarioResult {
     performanceScore: number;
     accuracyScore: number;
     cognitive: CognitiveFeatures;
-    vark?: { visual: number; auditory: number; readWrite: number; kinesthetic: number };
     avgTimeToStart: number;
     totalResponseLength: number;
     skippedQuestions: number;
     overtimeCount: number;
-    // Marks (1 mark per question)
-    marksObtained?: number;
-    totalMarks?: number;
-    perQuestionCorrect?: Record<number, boolean>;
     answers: Answers;
     questions?: Question[];
     questionsMetrics?: Record<
@@ -164,4 +155,66 @@ export interface CategoryResult {
     secondary_emoji?: string;
     secondary_confidence?: number;
     category_blend: boolean;
+}
+
+// ─── DYNAMIC ASSESSMENT MODES ─────────────────────────────────────────────────
+
+export type AssessmentMode = 'ai-scenario' | 'custom-paper' | 'ai-material';
+
+export type ExamDifficulty = 'easy' | 'normal' | 'hard';
+
+// 'mcq' = multiple choice (auto-graded by key); 'short' = brief written answer;
+// 'long' = extended/essay answer graded by number of valid points covered.
+// 'short' and 'long' are both graded cumulatively by AI and feed the cognitive
+// text evaluation.
+export type CustomQuestionType = 'mcq' | 'short' | 'long';
+
+export interface CustomExamQuestion {
+    id: number;
+    type: CustomQuestionType;
+    marks: number;
+    question: string;
+    options: string[];        // empty array for written ('short'/'long') questions
+    // Answer-key fields — present only in the server-side copy and in the graded
+    // result returned AFTER submission. Stripped from the exam sent to the client
+    // before the exam starts, so answers can never leak.
+    correctAnswer?: string;   // MCQ letter (A–D)
+    explanation?: string;
+    keyPoints?: string[];     // model answer points for grading written questions
+}
+
+export interface ExamConfig {
+    materialText: string;
+    mcqCount: number;
+    shortCount: number;
+    longCount: number;
+    totalMarks: number;
+    difficulty: ExamDifficulty;
+}
+
+export interface GeneratedExam {
+    examId?: string;          // server-side handle used for leak-free grading
+    examTitle: string;
+    totalMarks: number;
+    questions: CustomExamQuestion[];
+}
+
+// Per-question grading detail returned by the server after submission.
+export interface GradedQuestion {
+    id: number;
+    awardedMarks: number;
+    correct?: boolean;        // MCQ only
+    feedback?: string;        // written-answer AI feedback
+    pointsCovered?: number;   // long-answer: valid points the student covered
+    totalPoints?: number;     // long-answer: expected key points count
+}
+
+export interface ExamGradingResult {
+    questions: CustomExamQuestion[];   // full questions WITH answer key (post-submit)
+    graded: GradedQuestion[];
+    obtainedMarks: number;
+    totalMarks: number;
+    mcqMarks: number;
+    shortMarks: number;
+    cognitive?: CognitiveFeatures;     // from cumulative AI text evaluation
 }

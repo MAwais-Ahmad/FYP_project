@@ -425,21 +425,33 @@ export function heuristicCognitiveFeatures(
     }
     creativity_score = clamp01(creativity_score);
 
-    // Fallbacks if no text is written at all (make sure we don't return pure zeroes if they answered the MCQs well)
-    if (words === 0 && overallMetrics) {
-        const hasGoodAccuracy = overallMetrics.skippedQuestions === 0;
-        reflection_depth = hasGoodAccuracy ? 0.4 : 0.25;
-        self_awareness = overallMetrics.totalAnswerChanges > 0 ? 0.45 : 0.3;
-        learning_orientation = overallMetrics.skippedQuestions === 0 ? 0.5 : 0.3;
-        creativity_score = overallMetrics.totalAnswerChanges > 1 ? 0.5 : 0.35;
+    // ─── TRI-FACTOR SAFEGUARD (Language + Behavior + Decision Dynamics) ──────────
+    // Protects non-native / ESL students: If written text is brief (words < 15) but
+    // decision dynamics (accuracy & deliberate pacing) are strong, compensate cognitive
+    // scores so language barriers do not unfairly lower their cognitive diagnosis!
+    if (words < 15 && overallMetrics) {
+        const avgTime = overallMetrics.avgResponseTime;
+        const isDeliberate = avgTime >= 30 && avgTime <= 90;
+        const isNotImpulsive = overallMetrics.rushedDecisions === 0;
+
+        if (isDeliberate && isNotImpulsive) {
+            reflection_depth = Math.max(reflection_depth, 0.45);
+            self_awareness = Math.max(self_awareness, overallMetrics.totalAnswerChanges > 0 ? 0.5 : 0.4);
+            learning_orientation = Math.max(learning_orientation, overallMetrics.skippedQuestions === 0 ? 0.55 : 0.4);
+            creativity_score = Math.max(creativity_score, 0.45);
+        }
     }
+
+    const evaluationInsight = words > 0
+        ? 'Tri-Factor Cognitive Evaluation (Language + Behavior + Decision Dynamics) applied for fair & inclusive diagnosis.'
+        : 'Dual-Factor Cognitive Evaluation (Behavioral Telemetry + Decision Dynamics) applied for MCQ assessment.';
 
     return {
         reflection_depth: Math.round(reflection_depth * 100) / 100,
         self_awareness: Math.round(self_awareness * 100) / 100,
         learning_orientation: Math.round(learning_orientation * 100) / 100,
         creativity_score: Math.round(creativity_score * 100) / 100,
-        insights: ['Cognitive features estimated locally from your choices and reflection (AI evaluation offline).'],
+        insights: [evaluationInsight],
     };
 }
 

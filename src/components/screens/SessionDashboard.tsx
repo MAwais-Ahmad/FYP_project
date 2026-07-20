@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getSessionResults, toggleSession, AuthUser } from '../../services/api';
+import { getSessionResults, toggleSession, deleteSession, AuthUser } from '../../services/api';
 import { StudentRecord } from '../../utils/storage';
 import { RecordBlock } from '../ui/RecordBlock';
 
@@ -42,6 +42,9 @@ export function SessionDashboard({
     const [error, setError] = useState('');
     const [copied, setCopied] = useState(false);
     const [isHost, setIsHost] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState('');
 
     const loadData = async () => {
         setIsLoading(true);
@@ -81,6 +84,19 @@ export function SessionDashboard({
         }
     };
 
+    const handleDeleteSession = async () => {
+        if (!session) return;
+        setIsDeleting(true);
+        setDeleteError('');
+        const result = await deleteSession(session.id);
+        if (result.success) {
+            onBack();
+        } else {
+            setDeleteError(result.error || 'Failed to delete session');
+            setIsDeleting(false);
+        }
+    };
+
     // Build StudentRecord from session member's record data
     const memberToRecord = (member: SessionMember): StudentRecord | null => {
         if (!member.record) return null;
@@ -105,7 +121,6 @@ export function SessionDashboard({
             cognitive: r.cognitive,
             overall: r.overall,
             scenarioResults: r.scenarioResults,
-            vark: r.vark,
         };
     };
 
@@ -182,12 +197,20 @@ export function SessionDashboard({
                             {session.isActive ? '🟢 Active' : '🔴 Closed'}
                         </span>
                         {isHost && (
-                            <button
-                                onClick={handleToggleSession}
-                                className="btn-secondary !py-1.5 !px-3 text-xs"
-                            >
-                                {session.isActive ? 'Close Session' : 'Reopen Session'}
-                            </button>
+                            <>
+                                <button
+                                    onClick={handleToggleSession}
+                                    className="btn-secondary !py-1.5 !px-3 text-xs"
+                                >
+                                    {session.isActive ? 'Close Session' : 'Reopen Session'}
+                                </button>
+                                <button
+                                    onClick={() => setShowDeleteConfirm(true)}
+                                    className="btn-secondary !py-1.5 !px-3 text-xs !text-red-400 hover:!bg-red-500/10"
+                                >
+                                    🗑️ Delete Session
+                                </button>
+                            </>
                         )}
                     </div>
                 </div>
@@ -233,22 +256,24 @@ export function SessionDashboard({
                 )}
             </div>
 
-            {/* If user is a member (not host), show start test button */}
-            {!isHost && (
-                <div className="glass-card p-6 text-center space-y-3">
-                    <div className="text-3xl">🧠</div>
-                    <h2 className="text-lg font-semibold">Ready to take the assessment?</h2>
-                    <p className="text-white/50 text-sm">
-                        Complete the AITA assessment for this session. Your results will be visible to the host.
-                    </p>
-                    <button
-                        onClick={() => onStartSessionTest(sessionId)}
-                        className="btn-primary !py-3 !px-8"
-                    >
-                        Start Assessment
-                    </button>
-                </div>
-            )}
+            {/* Start assessment — available to the host too, same options as solo assessment */}
+            <div className="glass-card p-6 text-center space-y-3">
+                <div className="text-3xl">🧠</div>
+                <h2 className="text-lg font-semibold">
+                    {isHost ? 'Want to try the assessment yourself?' : 'Ready to take the assessment?'}
+                </h2>
+                <p className="text-white/50 text-sm">
+                    {isHost
+                        ? "Take the same assessment you're hosting — AI Scenario, Custom Paper, or AI Material — just like a solo assessment."
+                        : 'Complete the AITA assessment for this session. Your results will be visible to the host.'}
+                </p>
+                <button
+                    onClick={() => onStartSessionTest(sessionId)}
+                    className="btn-primary !py-3 !px-8"
+                >
+                    Start Assessment
+                </button>
+            </div>
 
             {/* Participants */}
             {isHost && (
@@ -322,6 +347,42 @@ export function SessionDashboard({
                             })}
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Delete Session Confirmation Modal */}
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
+                    <div className="glass-card max-w-md w-full p-8 text-center space-y-5 border border-red-500/20 shadow-2xl">
+                        <div className="text-5xl">🗑️</div>
+                        <h2 className="text-xl font-bold">Delete "{session.title}"?</h2>
+                        <p className="text-sm text-white/60">
+                            This permanently deletes the session and its join code ({session.code}).
+                            {members.length > 0 && (
+                                <> {members.length} participant{members.length > 1 ? 's' : ''} will lose access, though their own completed results stay on their personal dashboards.</>
+                            )}
+                            {' '}This can't be undone.
+                        </p>
+                        {deleteError && (
+                            <p className="text-red-400 text-sm">⚠️ {deleteError}</p>
+                        )}
+                        <div className="flex gap-3 justify-center">
+                            <button
+                                onClick={() => setShowDeleteConfirm(false)}
+                                disabled={isDeleting}
+                                className="btn-secondary !py-2.5 !px-5 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleDeleteSession}
+                                disabled={isDeleting}
+                                className="btn-primary !py-2.5 !px-6 !bg-red-500 hover:!bg-red-600 disabled:opacity-50"
+                            >
+                                {isDeleting ? 'Deleting...' : '🗑️ Delete Permanently'}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </section>

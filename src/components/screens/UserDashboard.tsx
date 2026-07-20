@@ -55,7 +55,6 @@ export function UserDashboard({
                         cognitive: dbRec.cognitive,
                         overall: dbRec.overall,
                         scenarioResults: dbRec.scenarioResults,
-                        vark: dbRec.vark,
                     }));
                     setRecords(mapped.sort((a, b) => b.date.localeCompare(a.date)));
                 }

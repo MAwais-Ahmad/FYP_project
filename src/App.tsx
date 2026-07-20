@@ -7,10 +7,17 @@ import {
     RecordDetail,
     QuizScreen,
     ResultsScreen,
+    InterScenarioScreen,
+    AssessmentSetupScreen,
+    CustomQuizScreen,
+    CustomResultsScreen,
 } from './components';
+import { AIChatDrawer } from './components/ui/AIChatDrawer';
+import { CustomExamResults } from './components/screens/CustomQuizScreen';
 import { useQuizState, useMetrics } from './hooks';
 import { AuthUser, getMe, logout as apiLogout } from './services/api';
 import { StudentRecord } from './utils/storage';
+import { GeneratedExam } from './types/quiz.types';
 
 function App() {
     // Auth state
@@ -18,6 +25,10 @@ function App() {
     const [authChecked, setAuthChecked] = useState(false);
     const [selectedRecord, setSelectedRecord] = useState<StudentRecord | null>(null);
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+    // Dynamic Assessment state
+    const [customExam, setCustomExam] = useState<GeneratedExam | null>(null);
+    const [customExamResults, setCustomExamResults] = useState<CustomExamResults | null>(null);
 
     // Quiz state
     const {
@@ -28,12 +39,15 @@ function App() {
         questions,
         currentQuestionIndex,
         answers,
+        currentScenarioNumber,
         scenarioResults,
         studentName,
         tokensUsed,
         totalCost,
         startQuiz,
         completeScenario,
+        proceedToNextScenario,
+        finishAssessment,
         setAnswer,
         goToNextQuestion,
         goToPreviousQuestion,
@@ -112,7 +126,9 @@ function App() {
         setCurrentUser(null);
         setActiveSessionId(null);
         setSelectedRecord(null);
-        setScreen('auth');
+        setCustomExam(null);
+        setCustomExamResults(null);
+        goToWelcome();
     };
 
 
@@ -124,12 +140,28 @@ function App() {
     };
 
     const handleStartSoloTest = () => {
-        goToWelcome();
+        setScreen('assessment-setup');
     };
 
     const handleStartSessionTest = (sessionId: string) => {
         setActiveSessionId(sessionId);
+        setScreen('assessment-setup');
+    };
+
+    // AI Scenario flow (existing)
+    const handleStartAIScenario = () => {
         goToWelcome();
+    };
+
+    // Custom Exam flow (new)
+    const handleStartCustomExam = (exam: GeneratedExam) => {
+        setCustomExam(exam);
+        setScreen('custom-quiz');
+    };
+
+    const handleCustomExamComplete = (results: CustomExamResults) => {
+        setCustomExamResults(results);
+        setScreen('custom-results' as any);
     };
 
     const handleCompleteScenario = () => {
@@ -137,14 +169,36 @@ function App() {
         completeScenario(overall, questionsMetrics);
     };
 
+    const handleProceedToNextScenario = async (newDifficulty: number) => {
+        resetMetrics();
+        startMetrics();
+        await proceedToNextScenario(newDifficulty);
+    };
+
     const handleRestart = () => {
         resetMetrics();
         setActiveSessionId(null);
+        setCustomExam(null);
+        setCustomExamResults(null);
         if (currentUser) {
             setScreen('user-dashboard');
         } else {
             restartQuiz();
         }
+    };
+
+    // Abandon the in-progress scenario (mid-quiz exit). Unlike handleRestart,
+    // this preserves activeSessionId so a host/participant exiting a session
+    // test lands back on the session dashboard, not a generic one.
+    const handleExitQuiz = () => {
+        resetMetrics();
+        restartQuiz();
+        if (activeSessionId) {
+            setScreen('session-dashboard');
+        } else if (currentUser) {
+            setScreen('user-dashboard');
+        }
+        // else: restartQuiz() already left screen at 'welcome', correct for a guest.
     };
 
     const handleViewRecord = (record: StudentRecord) => {
@@ -220,6 +274,23 @@ function App() {
 
     return (
         <div className="app-container min-h-screen">
+            {/* Mid-Quiz Disconnect Warning Overlay */}
+            {isOffline && screen === 'quiz' && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6 animate-fadeIn">
+                    <div className="glass-card max-w-md w-full p-8 text-center space-y-4 border border-yellow-500/20 shadow-2xl">
+                        <div className="text-5xl animate-bounce">⚠️</div>
+                        <h2 className="text-2xl font-bold text-white">Network Signal Lost</h2>
+                        <p className="text-white/60 text-sm leading-relaxed">
+                            We cannot evaluate your cognitive features without a stable connection. Please reconnect to resume and ensure your final learning style classification remains accurate.
+                        </p>
+                        <div className="flex items-center justify-center gap-2 text-xs text-yellow-400 font-semibold uppercase tracking-wider bg-yellow-500/10 py-2 px-3 rounded-lg border border-yellow-500/15">
+                            <span className="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span>
+                            <span>Waiting for connection...</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Auth Screen */}
             {screen === 'auth' && (
                 <AuthScreen
@@ -237,6 +308,24 @@ function App() {
                     onViewRecord={handleViewRecord}
                     onViewSession={handleViewSession}
                     onLogout={handleLogout}
+                />
+            )}
+
+            {/* Assessment Setup Screen (Mode Selection) */}
+            {screen === 'assessment-setup' && (
+                <AssessmentSetupScreen
+                    onStartAIScenario={handleStartAIScenario}
+                    onStartCustomExam={handleStartCustomExam}
+                    onBack={() => {
+                        if (activeSessionId) {
+                            setScreen('session-dashboard');
+                        } else if (currentUser) {
+                            setScreen('user-dashboard');
+                        } else {
+                            goToWelcome();
+                        }
+                    }}
+                    userName={currentUser?.name}
                 />
             )}
 
@@ -259,12 +348,13 @@ function App() {
                 />
             )}
 
-            {/* Welcome Screen (guest or starting a test) */}
+            {/* Welcome Screen (guest or starting AI Scenario test) */}
             {screen === 'welcome' && (
                 <WelcomeScreen
                     onStart={handleStartQuiz}
                     onViewAuth={() => setScreen('auth')}
                     onViewDashboard={currentUser ? () => setScreen('user-dashboard') : undefined}
+                    onBack={() => setScreen('assessment-setup')}
                     isLoading={isLoading}
                     userName={currentUser?.name}
                     isOffline={isOffline}
@@ -277,6 +367,7 @@ function App() {
                     questions={questions}
                     currentQuestionIndex={currentQuestionIndex}
                     answers={answers}
+                    currentScenarioNumber={currentScenarioNumber}
                     onAnswer={handleAnswer}
                     onNext={goToNextQuestion}
                     onPrevious={goToPreviousQuestion}
@@ -287,6 +378,17 @@ function App() {
                     onQuestionStart={recordQuestionStart}
                     onQuestionEnd={recordQuestionEnd}
                     onBacktrack={recordBacktrack}
+                    onExit={handleExitQuiz}
+                />
+            )}
+
+            {screen === 'inter-scenario' && (
+                <InterScenarioScreen
+                    completedScenarioNumber={currentScenarioNumber}
+                    scenarioResult={scenarioResults[scenarioResults.length - 1] ?? null}
+                    isLoading={isLoading}
+                    onContinue={handleProceedToNextScenario}
+                    onFinish={finishAssessment}
                 />
             )}
 
@@ -305,6 +407,35 @@ function App() {
                             ? () => setScreen('user-dashboard')
                             : undefined
                     }
+                />
+            )}
+
+            {/* Custom Exam Quiz Screen */}
+            {screen === 'custom-quiz' && customExam && (
+                <CustomQuizScreen
+                    exam={customExam}
+                    onComplete={handleCustomExamComplete}
+                    onBack={handleRestart}
+                />
+            )}
+
+            {/* Custom Exam Results Screen */}
+            {(screen as string) === 'custom-results' && customExamResults && (
+                <CustomResultsScreen
+                    results={customExamResults}
+                    onRestart={handleRestart}
+                    onViewDashboard={
+                        currentUser
+                            ? () => setScreen('user-dashboard')
+                            : undefined
+                    }
+                />
+            )}
+
+            {/* Global AI Diagnostic Tutor Chatbot (Only available before & after assessment, hidden during active test session) */}
+            {screen !== 'quiz' && (screen as string) !== 'custom-quiz' && (
+                <AIChatDrawer
+                    recordContext={selectedRecord || customExamResults || (scenarioResults.length > 0 ? scenarioResults[scenarioResults.length - 1] : null)}
                 />
             )}
         </div>

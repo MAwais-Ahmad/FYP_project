@@ -1,18 +1,6 @@
 import { useState } from 'react';
 import { Question } from '../../types/quiz.types';
 
-// ─── DIAGRAM (inline SVG for visual questions) ────────────────────────────────
-
-function QuestionDiagram({ svg }: { svg?: string }) {
-    if (!svg) return null;
-    return (
-        <div
-            className="flex justify-center text-white bg-white/5 border border-white/10 rounded-xl p-4 overflow-x-auto"
-            dangerouslySetInnerHTML={{ __html: svg }}
-        />
-    );
-}
-
 // ─── TEXT QUESTION ─────────────────────────────────────────────────────────────
 
 interface TextQuestionProps {
@@ -44,7 +32,6 @@ export function TextQuestion({ question, value, onChange, onFirstInteraction }: 
             {question.hint && (
                 <p className="text-white/60 text-sm">💡 {question.hint}</p>
             )}
-            <QuestionDiagram svg={question.svg} />
             <div className="relative">
                 <textarea
                     className="text-input"
@@ -99,10 +86,6 @@ export function MCQQuestion({
                 </div>
             )}
             <h3 className="text-xl font-medium leading-relaxed">{question.question}</h3>
-            {question.hint && (
-                <p className="text-white/60 text-sm">💡 {question.hint}</p>
-            )}
-            <QuestionDiagram svg={question.svg} />
             <div className="space-y-3">
                 {question.options?.map((opt, idx) => {
                     const letter = String.fromCharCode(65 + idx);

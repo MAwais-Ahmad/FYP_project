@@ -4,9 +4,6 @@
 # Node modules
 node_modules/
 
-# Local embedded PostgreSQL data
-.pgdata/
-
 # Logs
 *.log
 npm-debug.log*
@@ -15,6 +12,11 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# IDE
+# IDE & Assistant
 .vscode/
 .idea/
+.claude/
+
+# OCR Data files & temporary uploads
+*.traineddata
+uploads/

@@ -4,12 +4,13 @@ interface WelcomeScreenProps {
     onStart: (difficultyLevel: number, name: string) => void;
     onViewAuth: () => void;
     onViewDashboard?: () => void;
+    onBack?: () => void;
     isLoading: boolean;
     userName?: string;
     isOffline?: boolean;
 }
 
-export function WelcomeScreen({ onStart, onViewAuth, onViewDashboard, isLoading, userName, isOffline = false }: WelcomeScreenProps) {
+export function WelcomeScreen({ onStart, onViewAuth, onViewDashboard, onBack, isLoading, userName, isOffline = false }: WelcomeScreenProps) {
     const [name, setName] = useState(userName || '');
 
     return (
@@ -21,7 +22,16 @@ export function WelcomeScreen({ onStart, onViewAuth, onViewDashboard, isLoading,
             {isOffline && (
                 <div className="absolute top-0 left-0 right-0 bg-yellow-500/20 border-b border-yellow-500/30 text-yellow-300 py-3 px-4 text-center text-sm font-medium z-50 flex items-center justify-center gap-2 backdrop-blur-md">
                     <span>⚠️</span>
-                    <span>You are currently offline. You can still take the test — results will be saved to your device and synced when you reconnect.</span>
+                    <span>You are currently offline. A stable internet connection is required to generate new AI-powered scenarios. You can still view your cached Dashboard.</span>
+                </div>
+            )}
+
+            {/* Top-left back navigation */}
+            {onBack && (
+                <div className="absolute top-4 left-4 z-20">
+                    <button onClick={onBack} className="btn-secondary !py-2 !px-4 text-sm">
+                        ← Back
+                    </button>
                 </div>
             )}
 
@@ -57,18 +67,18 @@ export function WelcomeScreen({ onStart, onViewAuth, onViewDashboard, isLoading,
                     <div className="grid md:grid-cols-2 gap-4 text-sm">
                         <div className="p-4 rounded-2xl bg-white/5 space-y-2 border border-white/5">
                             <h3 className="font-semibold text-primary-300 flex items-center gap-2">
-                                <span>1.</span> One Mixed Test — 12 Questions
+                                <span>1.</span> Interactive Dilemmas
                             </h3>
                             <p className="text-white/60 leading-relaxed text-xs">
-                                Mathematical, verbal, logical, general knowledge and visual diagram questions — a mix of MCQs and written answers, randomly selected so every attempt is different.
+                                Solve scenarios through sliders, rankings, and fast MCQs. No long typing required.
                             </p>
                         </div>
                         <div className="p-4 rounded-2xl bg-white/5 space-y-2 border border-white/5">
                             <h3 className="font-semibold text-accent-300 flex items-center gap-2">
-                                <span>2.</span> Instant Result Dashboard
+                                <span>2.</span> Cognitive Diagnostics
                             </h3>
                             <p className="text-white/60 leading-relaxed text-xs">
-                                Submit once and see your result dashboard immediately — accuracy, cognitive profile, decision style and behavioural metrics.
+                                AI calculates your Reflection Depth, Self-Awareness, and Creativity in real time.
                             </p>
                         </div>
                     </div>
@@ -95,17 +105,21 @@ export function WelcomeScreen({ onStart, onViewAuth, onViewDashboard, isLoading,
                 <div className="flex justify-center">
                     <button
                         onClick={() => onStart(5, userName || name.trim() || 'Anonymous')}
-                        disabled={isLoading}
+                        disabled={isLoading || isOffline}
                         className="btn-primary text-lg py-4 px-10 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {isLoading ? (
                             <>
-                                <span className="animate-spin">🧠</span>
-                                <span>Preparing Test...</span>
+                                <span className="animate-spin">🤖</span>
+                                <span>Generating Questions...</span>
+                            </>
+                        ) : isOffline ? (
+                            <>
+                                <span>Offline — Internet Required</span>
                             </>
                         ) : (
                             <>
-                                <span>Start Test</span>
+                                <span>Start Assessment</span>
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <path d="M5 12h14M12 5l7 7-7 7" />
                                 </svg>

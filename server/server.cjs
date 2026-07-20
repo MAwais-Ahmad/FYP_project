@@ -8,9 +8,51 @@ const { PrismaClient } = require('@prisma/client');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const MODEL = 'gpt-4o-mini';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const OPENROUTER_MODEL = 'meta-llama/llama-3.1-8b-instruct:free';
+const OPENAI_MODEL = 'gpt-4o-mini';
+
+const openrouterClient = process.env.OPENROUTER_API_KEY
+  ? new OpenAI({
+      baseURL: 'https://openrouter.ai/api/v1',
+      apiKey: process.env.OPENROUTER_API_KEY,
+      defaultHeaders: {
+        'HTTP-Referer': 'https://aita-platform.local',
+        'X-Title': 'AITA Platform',
+      }
+    })
+  : null;
+
+const openaiClient = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
+
+async function callAiCompletion(params) {
+  if (openrouterClient) {
+    try {
+      const res = await openrouterClient.chat.completions.create({
+        ...params,
+        model: OPENROUTER_MODEL,
+      });
+      return res;
+    } catch (err) {
+      console.warn(`⚠️ OpenRouter (${OPENROUTER_MODEL}) failed: ${err.message}. Falling back to OpenAI (${OPENAI_MODEL})...`);
+    }
+  }
+
+  if (openaiClient) {
+    return await openaiClient.chat.completions.create({
+      ...params,
+      model: OPENAI_MODEL,
+    });
+  }
+
+  throw new Error('No working AI API key available');
+}
+
+const MODEL = OPENROUTER_MODEL;
+const openai = { chat: { completions: { create: callAiCompletion } } };
+
 const prisma = new PrismaClient();
 
 let isDbConnected = false;
@@ -481,6 +523,27 @@ app.patch('/api/sessions/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Permanently delete a session (host-only). Cascades to SessionMembers via the
+// schema's onDelete: Cascade; student Records themselves are untouched since
+// they're independently owned by the student's User, not the session.
+app.delete('/api/sessions/:id', requireAuth, async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({ where: { id: req.params.id } });
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+    if (session.hostId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Only the host can delete this session' });
+    }
+    await prisma.session.delete({ where: { id: req.params.id } });
+    console.log(`🗑️ Session deleted: ${session.code} — "${session.title}" by ${req.user.name}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Session delete error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to delete session' });
+  }
+});
+
 // ─── SCENARIO FORMATS (11 formats — far beyond just budget allocation!) ───────
 const scenarioFormats = [
   {
@@ -531,8 +594,8 @@ const scenarioFormats = [
 ];
 
 // ─── DYNAMIC QUESTION PHASES (12 per scenario) ────────────────────────────────
-// Scenario 1 & 2: 10 Interactive questions (mcq, ranking, slider, mcq-urgent) + 2 VARK questions.
-// Scenario 3: 7 interactive, 2 VARK, 3 text/reflection.
+// Scenario 1 & 2: 12 Interactive questions (mcq, ranking, slider, mcq-urgent).
+// Scenario 3: 9 interactive, 3 text/reflection.
 
 const INTERACTIVE_TYPES = [
   { phaseName: 'Information Filtering', type: 'mcq', desc: 'Decide which piece of data/file/resource/person to trust MOST before acting.', timeRange: '30-60s' },
@@ -543,20 +606,13 @@ const INTERACTIVE_TYPES = [
   { phaseName: 'Ethical Dilemma', type: 'mcq', desc: 'Make a tough choice between doing the right thing vs the popular/easy thing.', timeRange: '40-70s' }
 ];
 
-const VARK_PHASE = {
-  phaseName: 'Learning Modality',
-  type: 'vark',
-  desc: 'Provide a contextual scenario choice where the student decides how they prefer to study, review, or verify critical details of the situation. Provide 4 options mapping to Visual, Auditory, Read-Write, and Kinesthetic methods.',
-  timeRange: '30-50s'
-};
-
 const TEXT_TYPES = [
   { phaseName: 'Understanding', type: 'text', desc: 'Identify the CORE tension / underlying problem in this specific story.', timeRange: '60s' },
   { phaseName: 'Collaboration', type: 'text', desc: 'Write exactly what you would say to persuade, delegate, or manage a specific person in the story.', timeRange: '60s' },
   { phaseName: 'Reflection', type: 'reflection', desc: 'Hindsight, calibration and honest self-grading.', timeRange: '0 (unlimited)' }
 ];
 
-const COGNITIVE_PHASES = [...INTERACTIVE_TYPES, ...TEXT_TYPES, VARK_PHASE];
+const COGNITIVE_PHASES = [...INTERACTIVE_TYPES, ...TEXT_TYPES];
 
 // Fixed, challenge-tuned per-question time limits (seconds) by question type.
 // The student never sees a per-question timer, but these still power the
@@ -569,7 +625,6 @@ const TIME_BY_TYPE = {
   slider: 45,
   'multi-text': 90,
   reflection: 0,    // unlimited
-  vark: 40,
 };
 
 // Fisher–Yates shuffle
@@ -585,28 +640,22 @@ function shuffle(arr) {
 // Build a dynamic phase order of 12 questions based on scenario number
 function buildPhaseOrder(scenarioNumber) {
   let selected = [];
-  
+
   if (scenarioNumber <= 2) {
-    // 10 Interactive Questions + 2 VARK Questions = 12 total
+    // 12 Interactive Questions = 12 total
     let interactivePool = [];
     for (let i = 0; i < 2; i++) {
       interactivePool.push(...INTERACTIVE_TYPES);
     }
-    interactivePool = shuffle(interactivePool).slice(0, 10);
-    
-    selected = [...interactivePool, VARK_PHASE, VARK_PHASE];
-    selected = shuffle(selected);
+    selected = shuffle(interactivePool).slice(0, 12);
   } else {
-    // Scenario 3: 7 Interactive, 2 VARK, 3 Text (including Reflection) = 12 total
+    // Scenario 3: 9 Interactive, 3 Text (including Reflection) = 12 total
     let interactivePool = [];
     for (let i = 0; i < 2; i++) {
       interactivePool.push(...INTERACTIVE_TYPES);
     }
-    interactivePool = shuffle(interactivePool).slice(0, 7);
-    
-    selected = [...interactivePool, VARK_PHASE, VARK_PHASE];
-    selected = shuffle(selected);
-    
+    selected = shuffle(interactivePool).slice(0, 9);
+
     // Add 3 text types at the end (Reflection is always absolute last)
     selected.push(TEXT_TYPES[0]); // Understanding
     selected.push(TEXT_TYPES[1]); // Collaboration
@@ -725,6 +774,564 @@ function getAdaptiveContext(difficultySignal, scenarioNumber) {
   return map[difficultySignal] || '';
 }
 
+// ─── DYNAMIC ASSESSMENT ENDPOINTS ────────────────────────────────────────────
+const multer = require('multer');
+const { PDFParse } = require('pdf-parse');
+const officeParser = require('officeparser');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } }); // 15MB max
+
+// Below this many characters of extracted text, treat the page/slide as image-only
+// (scanned PDF, slide screenshots, etc.) and retry extraction with OCR.
+const MIN_USABLE_TEXT_LENGTH = 40;
+
+// Extensions officeparser can be told about explicitly (bypasses its magic-byte
+// sniffing, which can misidentify a PPTX/DOCX — both are zip containers — as a
+// plain "zip" file when the exporter didn't lay out the archive the way the
+// sniffer expects).
+const OFFICEPARSER_FILE_TYPES = new Set(['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'pdf', 'rtf', 'md', 'html', 'csv', 'epub']);
+
+function officeParserFileTypeHint(filename) {
+  const ext = filename.slice(filename.lastIndexOf('.') + 1);
+  return OFFICEPARSER_FILE_TYPES.has(ext) ? ext : undefined;
+}
+
+// Unified extractor for PPTX/DOCX/PDF via officeparser's AST parser.
+// ocr:true rasterizes each page/slide and runs Tesseract OCR on it — much slower,
+// so it's only used as a fallback when the fast text-layer extraction comes up empty.
+async function extractWithOfficeParser(buffer, { ocr, fileType } = {}) {
+  try {
+    const ast = await officeParser.parseOffice(buffer, { ocr: !!ocr, fileType: fileType || null });
+    return {
+      text: ast ? ast.toText() : '',
+      pageCount: ast && Array.isArray(ast.content) && ast.content.length > 0 ? ast.content.length : 1,
+    };
+  } catch (err) {
+    console.warn('⚠️ officeParser error:', err.message || err);
+    return { text: '', pageCount: 1 };
+  }
+}
+
+// Extract text from a single uploaded file buffer (PDF/PPTX/DOCX/TXT), with an
+// OCR fallback for image-only pages. Returns { text, pageCount }.
+async function extractDocumentText(originalname, buffer) {
+  const filename = (originalname || '').toLowerCase();
+
+  if (filename.endsWith('.txt')) {
+    return { text: buffer.toString('utf8'), pageCount: 1 };
+  }
+
+  if (filename.endsWith('.pdf')) {
+    // Fast path: read the PDF's embedded text layer directly (no rendering/OCR).
+    let extractedText = '';
+    let pageCount = 1;
+    let parser;
+    try {
+      parser = new PDFParse({ data: buffer });
+      const data = await parser.getText();
+      extractedText = data.text || '';
+      pageCount = data.total || 1;
+    } catch (err) {
+      console.warn('⚠️ pdf-parse failed, will retry with OCR:', err.message);
+    } finally {
+      if (parser) await parser.destroy();
+    }
+
+    // Fallback for scanned/image-only PDFs: re-extract with OCR.
+    if (extractedText.trim().length < MIN_USABLE_TEXT_LENGTH) {
+      const ocrResult = await extractWithOfficeParser(buffer, { ocr: true, fileType: 'pdf' });
+      extractedText = ocrResult.text;
+      pageCount = ocrResult.pageCount;
+    }
+    return { text: extractedText, pageCount };
+  }
+
+  // PPTX/PPT/DOCX: try the fast text-layer path first.
+  const fileType = officeParserFileTypeHint(filename);
+  const result = await extractWithOfficeParser(buffer, { ocr: false, fileType });
+
+  // Fallback for slides/pages that are just embedded images (screenshots, scans).
+  if (result.text.trim().length < MIN_USABLE_TEXT_LENGTH) {
+    return extractWithOfficeParser(buffer, { ocr: true, fileType });
+  }
+  return result;
+}
+
+// Upload one OR MORE documents (PDF, PPTX Slides, DOCX, TXT) → Extract text
+// locally ($0 cost) and concatenate. Accepts multiple files under the "pdf" field.
+app.post('/api/upload-pdf', upload.array('pdf', 10), async (req, res) => {
+  try {
+    const files = req.files || [];
+    if (files.length === 0) {
+      return res.status(400).json({ success: false, error: 'No document file uploaded' });
+    }
+
+    const parts = [];
+    let totalPageCount = 0;
+    const failed = [];
+
+    for (const file of files) {
+      try {
+        const { text, pageCount } = await extractDocumentText(file.originalname, file.buffer);
+        if (text && text.trim().length > 0) {
+          // Label each document so the AI can tell multi-file material apart.
+          const header = files.length > 1 ? `\n\n===== SOURCE: ${file.originalname} =====\n\n` : '';
+          parts.push(header + text.trim());
+          totalPageCount += pageCount || 1;
+        } else {
+          failed.push(file.originalname);
+        }
+      } catch (err) {
+        console.warn(`⚠️ Failed to extract "${file.originalname}":`, err.message);
+        failed.push(file.originalname);
+      }
+    }
+
+    const combinedText = parts.join('\n\n');
+    if (!combinedText || combinedText.trim().length === 0) {
+      return res.status(422).json({
+        success: false,
+        error: '🤖 AITA AI Assistant: No readable text detected in the uploaded file(s). If a photo is blurry or dim, use CamScanner or Adobe Scan for a sharp shot, or upload a digital PDF, DOCX, PPTX, or TXT file.',
+      });
+    }
+
+    res.json({
+      success: true,
+      text: combinedText,
+      pageCount: totalPageCount || 1,
+      fileCount: parts.length,
+      failedFiles: failed,
+    });
+  } catch (err) {
+    console.error('Document parse error:', err.message);
+    res.status(422).json({
+      success: false,
+      error: '🤖 AITA AI Assistant: Unable to process these files. If a picture is blurry or dim, try capturing it with CamScanner for a crisp shot, or upload a digital PDF/Word document.',
+    });
+  }
+});
+
+// ─── EXAM STORE (leak-free grading) ───────────────────────────────────────────
+// Full exams (WITH answer key) are kept server-side, keyed by examId. The client
+// only ever receives a stripped copy, so the correct answers cannot be read
+// before the student submits.
+const examStore = new Map();
+const EXAM_STORE_MAX = 500;
+
+function storeExam(fullExam) {
+  const examId = crypto.randomUUID();
+  if (examStore.size >= EXAM_STORE_MAX) {
+    const oldest = examStore.keys().next().value; // Map preserves insertion order
+    examStore.delete(oldest);
+  }
+  examStore.set(examId, { exam: fullExam, createdAt: Date.now() });
+  return examId;
+}
+
+// Question types and their default marks. 'short' and 'long' are both written
+// answers graded by AI; 'long' expects a fuller, multi-point response.
+const DEFAULT_MARKS = { mcq: 1, short: 3, long: 6 };
+const WRITTEN_TYPES = new Set(['short', 'long']);
+const TYPE_ORDER = { mcq: 0, short: 1, long: 2 }; // display grouping order
+
+// Normalize raw AI/parser question objects into a consistent, validated shape.
+// - reorder=true  → group by type (MCQ → short → long) and renumber ids 1..N.
+//   Used at generation/parse time (no student answers exist yet, so it's safe).
+// - reorder=false → preserve each question's original id and order. Used for
+//   inline grading of manually-authored exams, where answers are already keyed
+//   by the client's ids and must not be remapped.
+function normalizeExamQuestions(rawQuestions, { reorder = false } = {}) {
+  if (!Array.isArray(rawQuestions)) return [];
+
+  let items = rawQuestions
+    .map((q) => {
+      const type = WRITTEN_TYPES.has(q.type) ? q.type : 'mcq';
+      const marks = Math.max(1, parseInt(q.marks, 10) || DEFAULT_MARKS[type]);
+      const question = String(q.question || '').trim();
+      const origId = q.id;
+      if (WRITTEN_TYPES.has(type)) {
+        return {
+          origId,
+          type,
+          marks,
+          question,
+          options: [],
+          keyPoints: Array.isArray(q.keyPoints) ? q.keyPoints.map(String) : [],
+          explanation: q.explanation ? String(q.explanation) : '',
+        };
+      }
+      return {
+        origId,
+        type: 'mcq',
+        marks,
+        question,
+        options: Array.isArray(q.options) ? q.options.map(String) : [],
+        correctAnswer: (q.correctAnswer || '').toString().trim().charAt(0).toUpperCase(),
+        explanation: q.explanation ? String(q.explanation) : '',
+      };
+    })
+    .filter(q => q.question.length > 0 && (q.type !== 'mcq' || q.options.length >= 2));
+
+  if (reorder) {
+    // Stable sort by type group (keeps generation order within each group).
+    items = items
+      .map((q, i) => ({ q, i }))
+      .sort((a, b) => (TYPE_ORDER[a.q.type] - TYPE_ORDER[b.q.type]) || (a.i - b.i))
+      .map(x => x.q);
+  }
+
+  return items.map((q, i) => {
+    const { origId, ...rest } = q;
+    return { id: reorder ? i + 1 : (origId != null ? origId : i + 1), ...rest };
+  });
+}
+
+// Strip answer-key fields before sending an exam to the client.
+function stripExamForClient(fullExam, examId) {
+  return {
+    examId,
+    examTitle: fullExam.examTitle,
+    totalMarks: fullExam.totalMarks,
+    questions: fullExam.questions.map(q => ({
+      id: q.id,
+      type: q.type,
+      marks: q.marks,
+      question: q.question,
+      options: q.options || [],
+    })),
+  };
+}
+
+const DIFFICULTY_INSTRUCTIONS = {
+  easy: 'Focus 80% on direct recall, definitions, and basic facts. 20% on simple application. Questions should test surface-level understanding.',
+  normal: 'Balance 50% core concept questions with 50% application/scenario-based questions. Test both understanding and ability to apply knowledge.',
+  hard: 'Focus 20% on foundational constraints and 80% on critical analysis, multi-step reasoning, edge cases, and synthesis across topics. Questions should challenge deep understanding.',
+};
+
+const MAX_TOTAL_QUESTIONS = 40;
+
+// Per-type instructions injected into the single-type generation prompt.
+const TYPE_SPEC = {
+  mcq: (marks) => `type "mcq": each with exactly 4 options labeled "A) ...","B) ...","C) ...","D) ...", a "correctAnswer" letter (A/B/C/D), a brief "explanation", marks = ${marks}.`,
+  short: (marks) => `type "short": NO options, marks = ${marks}, a concise prompt answerable in 2-3 sentences, plus 2-3 "keyPoints" (the ideal answer's key points, used for grading).`,
+  long: (marks) => `type "long": NO options, marks = ${marks}, an open-ended question needing an extended, multi-point explanation, plus 4-6 "keyPoints" — the distinct valid points a full-mark answer must cover.`,
+};
+
+// Generate exactly `count` questions of a single type. Because gpt-4o-mini can
+// under-deliver on large single-batch requests, we retry (with an avoid-list to
+// prevent duplicates) until we hit the count or run out of attempts. Returns
+// { questions, tokens }. Generating one type per call keeps the model on-count.
+async function generateQuestionsForType(materialText, type, count, difficulty) {
+  if (count < 1) return { questions: [], tokens: 0 };
+  const marks = DEFAULT_MARKS[type];
+  const collected = [];
+  let tokens = 0;
+
+  for (let attempt = 0; attempt < 3 && collected.length < count; attempt++) {
+    const need = count - collected.length;
+    const avoid = collected.map(q => q.question);
+    const avoidNote = avoid.length
+      ? `\nDo NOT repeat or paraphrase any of these already-created questions:\n- ${avoid.join('\n- ')}`
+      : '';
+
+    const prompt = `You are an expert exam generator. Based ONLY on the study material below, generate EXACTLY ${need} question(s), all of ${TYPE_SPEC[type](marks)}
+Produce the full count of ${need}. Every question must be derived from the material and be distinct from the others.
+
+DIFFICULTY LEVEL: ${String(difficulty).toUpperCase()}
+${DIFFICULTY_INSTRUCTIONS[difficulty] || DIFFICULTY_INSTRUCTIONS.normal}${avoidNote}
+
+Respond ONLY with valid JSON: { "questions": [ { "type": "${type}", "marks": ${marks}, "question": "…", ${type === 'mcq' ? '"options": ["A) …","B) …","C) …","D) …"], "correctAnswer": "A", "explanation": "…"' : '"keyPoints": ["point 1","point 2"]'} } ] }
+
+STUDY MATERIAL:
+${materialText.substring(0, 12000)}`;
+
+    const resp = await openai.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      max_tokens: Math.min(16000, 600 + need * 300),
+      response_format: { type: 'json_object' },
+    });
+    tokens += resp.usage?.total_tokens || 0;
+
+    let got = [];
+    try {
+      const raw = JSON.parse(resp.choices[0]?.message?.content || '{}');
+      got = Array.isArray(raw.questions) ? raw.questions : [];
+    } catch { got = []; }
+
+    for (const q of got) {
+      const text = String(q.question || '').trim();
+      if (!text) continue;
+      const dup = collected.some(c => c.question.trim().toLowerCase() === text.toLowerCase());
+      if (!dup) collected.push({ ...q, type });
+    }
+
+    if (got.length === 0) break; // model produced nothing usable — stop retrying
+  }
+
+  return { questions: collected.slice(0, count), tokens };
+}
+
+// Generate exam from material text using AI — supports a mix of MCQ + short +
+// long questions. Each type is generated in its own call (and retried to hit the
+// requested count), then all are grouped MCQ → short → long and renumbered.
+app.post('/api/generate-exam', async (req, res) => {
+  try {
+    let { materialText, mcqCount, shortCount, longCount, questionCount, difficulty = 'normal' } = req.body;
+
+    // Backward-compat: an old client sending only questionCount → treat as all MCQ.
+    mcqCount = Number.isFinite(mcqCount) ? mcqCount : (Number.isFinite(questionCount) ? questionCount : 10);
+    shortCount = Number.isFinite(shortCount) ? shortCount : 0;
+    longCount = Number.isFinite(longCount) ? longCount : 0;
+    mcqCount = Math.max(0, Math.min(MAX_TOTAL_QUESTIONS, Math.round(mcqCount)));
+    shortCount = Math.max(0, Math.min(MAX_TOTAL_QUESTIONS, Math.round(shortCount)));
+    longCount = Math.max(0, Math.min(MAX_TOTAL_QUESTIONS, Math.round(longCount)));
+
+    const totalRequested = mcqCount + shortCount + longCount;
+    if (totalRequested < 1) {
+      return res.status(400).json({ success: false, error: 'Please request at least one question.' });
+    }
+    if (totalRequested > MAX_TOTAL_QUESTIONS) {
+      return res.status(400).json({ success: false, error: `Please request at most ${MAX_TOTAL_QUESTIONS} questions in total.` });
+    }
+    if (!materialText || materialText.trim().length < 20) {
+      return res.status(400).json({ success: false, error: 'Please provide study material text (at least 20 characters).' });
+    }
+
+    // Generate all three types concurrently, each guaranteed to its count.
+    const [mcqRes, shortRes, longRes] = await Promise.all([
+      generateQuestionsForType(materialText, 'mcq', mcqCount, difficulty),
+      generateQuestionsForType(materialText, 'short', shortCount, difficulty),
+      generateQuestionsForType(materialText, 'long', longCount, difficulty),
+    ]);
+
+    const rawCombined = [...mcqRes.questions, ...shortRes.questions, ...longRes.questions];
+    const questions = normalizeExamQuestions(rawCombined, { reorder: true });
+    if (questions.length === 0) {
+      return res.status(500).json({ success: false, error: 'AI did not return any usable questions. Please try again.' });
+    }
+
+    const fullExam = {
+      examTitle: 'Generated Exam',
+      totalMarks: questions.reduce((s, q) => s + q.marks, 0),
+      questions,
+    };
+    const examId = storeExam(fullExam);
+
+    totalTokensUsed += mcqRes.tokens + shortRes.tokens + longRes.tokens;
+    const mcqN = questions.filter(q => q.type === 'mcq').length;
+    const shortN = questions.filter(q => q.type === 'short').length;
+    const longN = questions.filter(q => q.type === 'long').length;
+    console.log(`✅ Generated exam (${mcqN}/${mcqCount} MCQ + ${shortN}/${shortCount} short + ${longN}/${longCount} long, ${fullExam.totalMarks} marks, ${difficulty})`);
+
+    res.json({ success: true, exam: stripExamForClient(fullExam, examId) });
+  } catch (err) {
+    console.error('Generate exam error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to generate exam. Please try again.' });
+  }
+});
+
+// Parse an existing exam paper text into structured JSON (MCQ + written).
+app.post('/api/parse-paper', async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || text.trim().length < 20) {
+      return res.status(400).json({ success: false, error: 'Please provide exam paper text (at least 20 characters).' });
+    }
+
+    const prompt = `You are an expert exam parser. The following text is an exam paper. Extract every question.
+
+RULES:
+- A question with multiple choices → type "mcq" with options ["A) …","B) …","C) …","D) …"]. Include "correctAnswer" letter if an answer key is present, else "".
+- A question asking for a brief written/explanatory answer (no choices) → type "short" with NO options. Add 2-3 "keyPoints" capturing what a correct answer should mention (infer them if not stated).
+- A question asking for an extended, essay-style, or multi-part explanation → type "long" with NO options. Add 4-6 "keyPoints" — the distinct valid points a full answer should cover (infer them if not stated).
+- If marks are specified per question (e.g. "[2 marks]"), use that value. Otherwise default to 1 for MCQ, 3 for short, 6 for long.
+- Calculate totalMarks from all questions.
+
+Respond ONLY with valid JSON in this exact shape:
+{
+  "examTitle": "Parsed Exam Paper",
+  "totalMarks": <number>,
+  "questions": [
+    { "id": 1, "type": "mcq", "marks": 1, "question": "…?", "options": ["A) …","B) …","C) …","D) …"], "correctAnswer": "A", "explanation": "" },
+    { "id": 2, "type": "short", "marks": 3, "question": "Explain …", "keyPoints": ["point 1","point 2"] },
+    { "id": 3, "type": "long", "marks": 6, "question": "Discuss …", "keyPoints": ["point 1","point 2","point 3","point 4"] }
+  ]
+}
+
+EXAM PAPER TEXT:
+${text.substring(0, 12000)}`;
+
+    const response = await openai.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 12000,
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return res.status(500).json({ success: false, error: 'AI did not return a response.' });
+    }
+
+    const raw = JSON.parse(content);
+    const questions = normalizeExamQuestions(raw.questions, { reorder: true });
+    if (questions.length === 0) {
+      return res.status(500).json({ success: false, error: 'No questions could be extracted from this paper. Please check the document.' });
+    }
+
+    const fullExam = {
+      examTitle: raw.examTitle || 'Parsed Exam Paper',
+      totalMarks: questions.reduce((s, q) => s + q.marks, 0),
+      questions,
+    };
+    const examId = storeExam(fullExam);
+
+    totalTokensUsed += response.usage?.total_tokens || 0;
+    console.log(`✅ Parsed paper: ${fullExam.examTitle} (${questions.length} questions extracted)`);
+
+    res.json({ success: true, exam: stripExamForClient(fullExam, examId) });
+  } catch (err) {
+    console.error('Parse paper error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to parse paper. Please try again.' });
+  }
+});
+
+// ─── GRADE CUSTOM EXAM ────────────────────────────────────────────────────────
+// Grades MCQs by the stored answer key and grades ALL written answers together in
+// one cumulative AI call, which also yields cognitive features for the profile.
+app.post('/api/grade-exam', async (req, res) => {
+  try {
+    const { examId, exam: inlineExam, answers = {} } = req.body;
+
+    // Prefer the server-side stored exam (leak-free path); fall back to an inline
+    // exam for manually-authored papers the client created itself.
+    let fullExam = null;
+    if (examId && examStore.has(examId)) {
+      fullExam = examStore.get(examId).exam;
+    } else if (inlineExam && Array.isArray(inlineExam.questions)) {
+      // Inline (manual) exam: preserve the client's question ids so they keep
+      // matching the answers keyed by those ids.
+      fullExam = { ...inlineExam, questions: normalizeExamQuestions(inlineExam.questions, { reorder: false }) };
+    }
+    if (!fullExam) {
+      return res.status(404).json({ success: false, error: 'Exam session not found or expired. Please regenerate the exam.' });
+    }
+
+    const questions = fullExam.questions;
+    const graded = [];
+    let mcqMarks = 0;
+
+    // 1) Auto-grade MCQs against the key.
+    for (const q of questions) {
+      if (q.type !== 'mcq') continue;
+      const sel = (answers[q.id] || '').toString().trim().charAt(0).toUpperCase();
+      const correct = !!sel && sel === q.correctAnswer;
+      const awarded = correct ? q.marks : 0;
+      mcqMarks += awarded;
+      graded.push({ id: q.id, awardedMarks: awarded, correct });
+    }
+
+    // 2) Grade written answers (short + long) cumulatively via AI (also produces
+    //    cognitive features). Long answers are scored by how many distinct valid
+    //    points they cover vs the expected key points.
+    const shortQs = questions.filter(q => WRITTEN_TYPES.has(q.type));
+    let shortMarks = 0;
+    let cognitive = null;
+    let usage = { tokens: 0 };
+
+    if (shortQs.length > 0) {
+      const formatted = shortQs.map(q => {
+        let a = answers[q.id];
+        if (Array.isArray(a)) a = a.join(' ');
+        a = (a || '').toString().trim() || '[NO ANSWER PROVIDED]';
+        const kp = (q.keyPoints || []).length ? `\nExpected valid points (${q.keyPoints.length}): ${q.keyPoints.join('; ')}` : '';
+        const kind = q.type === 'long' ? 'LONG-ANSWER' : 'SHORT-ANSWER';
+        return `Q${q.id} [${kind}, worth ${q.marks} marks]: ${q.question}${kp}\nStudent answer: ${a}`;
+      }).join('\n\n');
+
+      const gradePrompt = `You are a fair, rigorous exam grader. Grade each written answer below on a 0..maxMarks scale for that question.
+
+SCORING METHOD:
+- SHORT-ANSWER: judge correctness, completeness and relevance to the expected points; award partial credit.
+- LONG-ANSWER: count how many of the DISTINCT expected valid points the student genuinely addresses, then award marks proportionally to the question's max marks (e.g. covering 3 of 4 expected points ≈ 75% of the marks). Give a small bonus for depth, correct reasoning and coherence; do not reward padding or repetition. A student may earn credit for a valid point not in the list if it is clearly correct and relevant.
+- Empty, irrelevant, or gibberish answers get 0.
+- awardedMarks must never exceed the question's max marks.
+
+Also assess the student's overall cognitive profile FROM THEIR WRITTEN ANSWERS on a 0.0–1.0 scale (do not default to 0.5 — discriminate):
+- reflection_depth: depth of reasoning, use of causal connectives ("because", "therefore").
+- self_awareness: acknowledging limits, assumptions, or trade-offs.
+- learning_orientation: curiosity, information-seeking, growth mindset.
+- creativity_score: originality and resourcefulness vs generic answers.
+
+WRITTEN QUESTIONS & ANSWERS:
+${formatted}
+
+Respond ONLY with valid JSON:
+{
+  "grades": [ { "id": <questionId>, "awardedMarks": <number>, "pointsCovered": <integer>, "feedback": "one concise sentence noting points hit/missed" } ],
+  "cognitive": { "reflection_depth": 0.0, "self_awareness": 0.0, "learning_orientation": 0.0, "creativity_score": 0.0, "insights": ["obs 1","obs 2"] }
+}`;
+
+      const completion = await openai.chat.completions.create({
+        model: MODEL,
+        messages: [{ role: 'user', content: gradePrompt }],
+        temperature: 0.2,
+        // Scale to the number of written answers so grades JSON isn't truncated.
+        max_tokens: Math.min(6000, 500 + shortQs.length * 160),
+        response_format: { type: 'json_object' },
+      });
+
+      const parsed = JSON.parse(completion.choices[0].message.content);
+      totalTokensUsed += completion.usage?.total_tokens || 0;
+      usage = { tokens: completion.usage?.total_tokens || 0 };
+
+      // Match model grades to questions robustly: prefer id match (string-coerced,
+      // since the model may return ids as numbers or strings), then fall back to
+      // positional order so a valid answer never silently scores 0 on a mismatch.
+      const rawGrades = Array.isArray(parsed.grades) ? parsed.grades : [];
+      const gradeById = {};
+      rawGrades.forEach(g => { if (g && g.id !== undefined && g.id !== null) gradeById[String(g.id)] = g; });
+
+      shortQs.forEach((q, idx) => {
+        const g = gradeById[String(q.id)] || rawGrades[idx] || {};
+        const awarded = Math.max(0, Math.min(q.marks, Number(g.awardedMarks) || 0));
+        shortMarks += awarded;
+        const entry = { id: q.id, awardedMarks: Math.round(awarded * 100) / 100, feedback: g.feedback || '' };
+        if (q.type === 'long') {
+          entry.pointsCovered = Number.isFinite(g.pointsCovered) ? g.pointsCovered : undefined;
+          entry.totalPoints = (q.keyPoints || []).length || undefined;
+        }
+        graded.push(entry);
+      });
+
+      cognitive = parsed.cognitive || null;
+    }
+
+    const obtainedMarks = Math.round((mcqMarks + shortMarks) * 100) / 100;
+
+    console.log(`🧮 Graded exam "${fullExam.examTitle}": ${obtainedMarks}/${fullExam.totalMarks} (MCQ ${mcqMarks} + written ${shortMarks})`);
+
+    res.json({
+      success: true,
+      result: {
+        questions,        // full questions WITH answer key, for post-submit review
+        graded,
+        obtainedMarks,
+        totalMarks: fullExam.totalMarks,
+        mcqMarks,
+        shortMarks,
+        cognitive,
+      },
+      usage,
+    });
+  } catch (err) {
+    console.error('Grade exam error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to grade exam. Please try again.' });
+  }
+});
+
 // ─── GENERATE SCENARIO + QUESTIONS ───────────────────────────────────────────
 app.post('/api/generate-scenario', async (req, res) => {
   try {
@@ -795,7 +1402,6 @@ Type-specific requirements:
 - type "slider": must include "min", "max", and "unit" (e.g. "Rs.", "Days", "Hours") for budget/resource allocation.
 - type "mcq-urgent": include "urgentUpdate" (a surprising twist/alert) and 4 options reacting to it.
 - type "multi-text": ask for 3 distinct approaches; include a "hint". (The UI shows 3 input boxes.)
-- type "vark": include exactly 4 options mapping directly to Visual, Auditory, Read-Write, and Kinesthetic learning preferences respectively. You MUST include a "varkMapping" array which contains exactly ["V", "A", "R", "K"] mapping to each of these options in their exact index order (e.g. if Option 1 is Visual, varkMapping[0] is 'V').
 - type "mcq-urgent": include a vivid "urgentUpdate" (a sudden twist UNIQUE to this story, prefixed with 🚨) AND exactly 4 "options". Keep it tight and high-pressure. The twist must be freshly generated, never a stock template.
 - type "reflection": timeLimit MUST be 0. Ask ONLY: "Looking back, what would you do differently and why?" (Do NOT ask the student to self-rate a confidence number — confidence is measured automatically.)
 
@@ -810,7 +1416,7 @@ Return ONLY this JSON structure (questions array must follow the shuffled order 
     "totalTimeLimit": [number of seconds]
   },
   "questions": [
-    { "id": <n>, "phase": <cognitivePhaseNumber>, "phaseName": "<exact name>", "type": "<exact type>", "timeLimit": <seconds>, "question": "...", "hint": "...(text/multi-text)", "context": "...(optional, text only)", "options": ["...","...","...","..."], "varkMapping": ["V", "A", "R", "K"], "urgentUpdate": "🚨 ...(mcq-urgent only)" }
+    { "id": <n>, "phase": <cognitivePhaseNumber>, "phaseName": "<exact name>", "type": "<exact type>", "timeLimit": <seconds>, "question": "...", "hint": "...(text/multi-text)", "context": "...(optional, text only)", "options": ["...","...","...","..."], "urgentUpdate": "🚨 ...(mcq-urgent only)" }
   ]
 }`,
         },
@@ -829,7 +1435,7 @@ Return ONLY this JSON structure (questions array must follow the shuffled order 
 
     // ── Normalise questions to the shuffled phase contract ──────────────────
     // Defends against LLM drift so the frontend always renders valid types/order.
-    const allowedTypes = new Set(['text', 'mcq', 'mcq-urgent', 'multi-text', 'ranking', 'reflection', 'slider', 'vark']);
+    const allowedTypes = new Set(['text', 'mcq', 'mcq-urgent', 'multi-text', 'ranking', 'reflection', 'slider']);
     if (Array.isArray(data.questions)) {
       data.questions = data.questions.slice(0, 12).map((q, i) => {
 
@@ -975,63 +1581,11 @@ Return JSON format:
     totalTokensUsed += completion.usage.total_tokens;
     const estimatedCost = (completion.usage.prompt_tokens * 0.00000015) + (completion.usage.completion_tokens * 0.0000006);
 
-    // Extract vark score if vark questions exist
-    let varkSummary = { V: 0, A: 0, R: 0, K: 0 };
-    let varkCount = 0;
-    
-    questions.forEach(q => {
-      if (q.type === 'vark' && q.varkMapping) {
-        const studentAnswer = answers[q.id];
-        const selectedIndex = (q.options || []).indexOf(studentAnswer);
-        if (selectedIndex !== -1) {
-          const mapping = q.varkMapping[selectedIndex];
-          if (mapping && varkSummary[mapping] !== undefined) {
-            varkSummary[mapping]++;
-            varkCount++;
-          }
-        }
-      }
-    });
-
-    const varkScores = {
-      visual: varkCount > 0 ? varkSummary.V / varkCount : 0.25,
-      auditory: varkCount > 0 ? varkSummary.A / varkCount : 0.25,
-      readWrite: varkCount > 0 ? varkSummary.R / varkCount : 0.25,
-      kinesthetic: varkCount > 0 ? varkSummary.K / varkCount : 0.25,
-    };
-    
-    evaluation.vark = varkScores;
-
-    console.log(`🧠 Evaluation | Acc: ${evaluation.accuracy_score} | VARK: V:${(varkScores.visual*100).toFixed(0)}% A:${(varkScores.auditory*100).toFixed(0)}% | ${completion.usage.total_tokens} tokens | ~$${estimatedCost.toFixed(4)}`);
+    console.log(`🧠 Evaluation | Acc: ${evaluation.accuracy_score} | ${completion.usage.total_tokens} tokens | ~$${estimatedCost.toFixed(4)}`);
     res.json({ success: true, evaluation, usage: { tokens: completion.usage.total_tokens, estimatedCost } });
 
   } catch (error) {
     console.error('❌ Evaluation error:', error.message);
-    
-    let varkSummary = { V: 0, A: 0, R: 0, K: 0 };
-    let varkCount = 0;
-    try {
-      (questions || []).forEach(q => {
-        if (q.type === 'vark' && q.varkMapping) {
-          const studentAnswer = (answers || {})[q.id];
-          const selectedIndex = (q.options || []).indexOf(studentAnswer);
-          if (selectedIndex !== -1) {
-            const mapping = q.varkMapping[selectedIndex];
-            if (mapping && varkSummary[mapping] !== undefined) {
-              varkSummary[mapping]++;
-              varkCount++;
-            }
-          }
-        }
-      });
-    } catch {}
-
-    const varkScores = {
-      visual: varkCount > 0 ? varkSummary.V / varkCount : 0.25,
-      auditory: varkCount > 0 ? varkSummary.A / varkCount : 0.25,
-      readWrite: varkCount > 0 ? varkSummary.R / varkCount : 0.25,
-      kinesthetic: varkCount > 0 ? varkSummary.K / varkCount : 0.25,
-    };
 
     res.json({
       success: true,
@@ -1042,10 +1596,123 @@ Return JSON format:
           learning_orientation: 0.3, creativity_score: 0.3,
           insights: ['Analysis unavailable due to an error — default penalty applied'],
         },
-        vark: varkScores
       },
       usage: { tokens: 0, estimatedCost: 0 },
     });
+  }
+});
+
+// ─── AI TUTOR & INTELLIGENCE CHATBOT ENDPOINT ────────────────────────────────
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { messages = [], recordContext = null } = req.body;
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+
+    // Search database for student or exam queries (e.g. "Physics Test 1 Haris")
+    let databaseContextStr = '';
+    if (isDbConnected && lastUserMsg.length > 3) {
+      try {
+        const keywords = lastUserMsg.split(/\s+/).filter(w => w.length > 2);
+        if (keywords.length > 0) {
+          const dbRecords = await prisma.record.findMany({
+            take: 10,
+            orderBy: { date: 'desc' },
+            include: { user: true },
+          });
+
+          // Filter relevant records
+          const matching = dbRecords.filter(r => {
+            const studentName = (r.user?.name || '').toLowerCase();
+            const examTitle = (r.primaryName || '').toLowerCase();
+            const queryLower = lastUserMsg.toLowerCase();
+            return (
+              (studentName && queryLower.includes(studentName)) ||
+              (examTitle && queryLower.includes(examTitle)) ||
+              queryLower.includes('student') ||
+              queryLower.includes('class') ||
+              queryLower.includes('test') ||
+              queryLower.includes('result')
+            );
+          });
+
+          if (matching.length > 0) {
+            databaseContextStr = '\n\nDATABASE STUDENT RECORDS SUMMARY:\n' + matching.map(r => {
+              const name = r.user?.name || 'Anonymous Student';
+              const date = new Date(r.date).toLocaleDateString();
+              return `- Student: ${name} | Date: ${date} | Score: ${r.performanceScore}% | Category: ${r.primaryName} | Decision Style: ${r.decisionStyle} | Avg Time: ${r.avgResponseTime}s`;
+            }).join('\n');
+          }
+        }
+      } catch (err) {
+        console.log('Chat DB search error:', err.message);
+      }
+    }
+
+    const systemPrompt = `You are AITA Core AI — the official Intelligent Tutor & Diagnostic Assistant for the AITA (Adaptive Diagnostic & Cognitive Profiler) platform.
+
+YOUR RESPONSIBILITIES & PERSONA:
+1. Academic, encouraging, highly analytical AI tutor and teacher assistant.
+2. Explain cognitive profiles (Fast Learner, Strategic Thinker, Slow & Thorough, Steady Achiever, Quick & Careless, Inconsistent Performer, Concept Struggler, Ignorant/Avoider) based on accuracy, response speed, answer revisions, and confidence calibration.
+3. Help students understand test questions, core concepts, and why options are correct or incorrect.
+4. Assist teachers by looking up student results, summarizing performance in tests (e.g., "Physics Test 1"), and highlighting students who need support.
+5. STRICT GUARDRAIL: Speak authoritatively about AITA's advanced AI multi-dimensional diagnostic classification engine. NEVER mention internal fallback rules or technical system limitations. Speak with 100% confidence about the platform's features.
+
+FORMATTING:
+- Use bullet points, bold text, and clean GitHub-style markdown. Keep responses clear and concise.${recordContext ? `\n\nACTIVE TEST RESULT CONTEXT:\n${JSON.stringify(recordContext, null, 2)}` : ''}${databaseContextStr}`;
+
+    const apiMessages = [
+      { role: 'system', content: systemPrompt },
+      ...messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
+    ];
+
+    let reply = '';
+
+    // Attempt 1: OpenRouter Free API (if key present)
+    if (process.env.OPENROUTER_API_KEY) {
+      try {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://aita-platform.local',
+            'X-Title': 'AITA Platform',
+          },
+          body: JSON.stringify({
+            model: 'meta-llama/llama-3.3-70b-instruct:free',
+            messages: apiMessages,
+            temperature: 0.7,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          reply = data.choices?.[0]?.message?.content || '';
+        }
+      } catch (err) {
+        console.log('OpenRouter chat fallback to OpenAI:', err.message);
+      }
+    }
+
+    // Attempt 2: OpenAI Fallback
+    if (!reply && process.env.OPENAI_API_KEY) {
+      const response = await openai.chat.completions.create({
+        model: MODEL,
+        messages: apiMessages,
+        temperature: 0.7,
+      });
+      reply = response.choices?.[0]?.message?.content || '';
+      totalTokensUsed += response.usage?.total_tokens || 0;
+    }
+
+    if (!reply) {
+      reply = 'I am your AITA AI Tutor. I can help analyze your cognitive profile, explain specific question concepts, or summarize student results for teachers!';
+    }
+
+    res.json({ success: true, message: reply });
+  } catch (err) {
+    console.error('Chat endpoint error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to process chat message.' });
   }
 });
 
@@ -1095,7 +1762,6 @@ app.post('/api/records', async (req, res) => {
         cognitive: recordData.cognitive || {},
         overall: recordData.overall || {},
         scenarioResults: recordData.scenarioResults || [],
-        vark: recordData.vark || null
       }
     });
 
@@ -1191,6 +1857,14 @@ app.get('/api/health', (req, res) => {
       'age-18-25',
     ],
   });
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Uncaught Exception trapped:', err.message || err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ Unhandled Rejection trapped:', reason?.message || reason);
 });
 
 app.listen(PORT, () => {

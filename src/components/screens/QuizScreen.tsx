@@ -16,6 +16,7 @@ interface QuizScreenProps {
     questions: Question[];
     currentQuestionIndex: number;
     answers: Answers;
+    currentScenarioNumber: number;
     onAnswer: (questionId: number, answer: string | string[]) => void;
     onNext: () => void;
     onPrevious: () => void;
@@ -26,6 +27,7 @@ interface QuizScreenProps {
     onQuestionStart: (questionId: number, timeLimit: number, phase: number) => void;
     onQuestionEnd: (questionId: number) => void;
     onBacktrack: () => void;
+    onExit: () => void;
 }
 
 export function QuizScreen({
@@ -33,6 +35,7 @@ export function QuizScreen({
     questions,
     currentQuestionIndex,
     answers,
+    currentScenarioNumber,
     onAnswer,
     onNext,
     onPrevious,
@@ -43,10 +46,12 @@ export function QuizScreen({
     onQuestionStart,
     onQuestionEnd,
     onBacktrack,
+    onExit,
 }: QuizScreenProps) {
     const question = questions[currentQuestionIndex];
     const isFirstQuestion = currentQuestionIndex === 0;
     const isLastQuestion = currentQuestionIndex === questions.length - 1;
+    const [showExitConfirm, setShowExitConfirm] = useState(false);
 
     // Overall scenario timer (counts down from totalTimeLimit) — the only timer
     // shown to the student. Per-question limits still exist behind the scenes
@@ -147,7 +152,6 @@ export function QuizScreen({
                     />
                 );
 
-            case 'vark':
             case 'mcq':
             case 'mcq-urgent':
                 return (
@@ -235,11 +239,21 @@ export function QuizScreen({
             {/* Header (compact) */}
             <header className="flex flex-wrap items-center justify-between gap-2 mb-3 shrink-0">
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setShowExitConfirm(true)}
+                        title="Exit this scenario"
+                        className="btn-secondary !py-1 !px-3 !text-xs flex items-center gap-1"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7" />
+                        </svg>
+                        <span className="hidden sm:inline">Exit</span>
+                    </button>
                     <div className="px-2.5 py-1 rounded-full text-xs font-medium bg-white/10 border border-white/20 text-white/70">
-                        Aptitude Test
+                        Scenario {currentScenarioNumber}
                     </div>
                     <div className="phase-badge !px-3 !py-1 !text-xs">
-                        {question.phaseName}
+                        P{question.phase}: {question.phaseName}
                     </div>
                 </div>
 
@@ -261,7 +275,7 @@ export function QuizScreen({
                     {scenario.totalTimeLimit && scenario.totalTimeLimit > 0 && (
                         <div
                             className={`px-3 py-1.5 rounded-full border text-sm font-mono font-medium flex items-center gap-1.5 ${getOverallTimerClasses()}`}
-                            title="Total time remaining for this test"
+                            title="Total time remaining for this scenario"
                         >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <circle cx="12" cy="12" r="10" />
@@ -320,7 +334,7 @@ export function QuizScreen({
 
                 {isLastQuestion ? (
                     <button onClick={onCompleteScenario} className="btn-success !py-2 !px-4 text-sm">
-                        <span className="hidden sm:inline">Submit Test</span>
+                        <span className="hidden sm:inline">Submit Scenario {currentScenarioNumber}</span>
                         <span className="sm:hidden">Submit</span>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M20 6L9 17l-5-5" />
@@ -335,6 +349,33 @@ export function QuizScreen({
                     </button>
                 )}
             </div>
+
+            {/* Exit Confirmation Modal */}
+            {showExitConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
+                    <div className="glass-card max-w-md w-full p-8 text-center space-y-5 border border-white/10 shadow-2xl">
+                        <div className="text-5xl">⚠️</div>
+                        <h2 className="text-xl font-bold">Exit this scenario?</h2>
+                        <p className="text-sm text-white/60">
+                            Your progress and answers for Scenario {currentScenarioNumber} will be lost. This can't be undone.
+                        </p>
+                        <div className="flex gap-3 justify-center">
+                            <button
+                                onClick={() => setShowExitConfirm(false)}
+                                className="btn-secondary !py-2.5 !px-5"
+                            >
+                                ← Stay
+                            </button>
+                            <button
+                                onClick={onExit}
+                                className="btn-primary !py-2.5 !px-6 !bg-red-500 hover:!bg-red-600"
+                            >
+                                ✕ Exit Anyway
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </section>
     );
 }
