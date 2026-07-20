@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { uploadPdf, generateExam, parsePaper } from '../../services/api';
-import { CustomExamQuestion, ExamDifficulty, GeneratedExam } from '../../types/quiz.types';
+import { CustomExamQuestion, CustomQuestionType, ExamDifficulty, GeneratedExam } from '../../types/quiz.types';
 
 interface AssessmentSetupScreenProps {
     onStartAIScenario: () => void;
@@ -11,6 +11,9 @@ interface AssessmentSetupScreenProps {
 
 type SetupTab = 'select-mode' | 'custom-paper' | 'ai-material';
 type CustomPaperMode = 'upload' | 'manual';
+
+const MARKS_PER_MCQ = 1;
+const MARKS_PER_SHORT = 3;
 
 export function AssessmentSetupScreen({
     onStartAIScenario,
@@ -26,22 +29,22 @@ export function AssessmentSetupScreen({
     const [isUploading, setIsUploading] = useState(false);
     const [isParsing, setIsParsing] = useState(false);
     const [uploadError, setUploadError] = useState('');
-    const [pdfPageCount, setPdfPageCount] = useState(0);
+    const [paperFiles, setPaperFiles] = useState<string[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Manual entry state
+    // Manual entry state (supports MCQ + written questions)
     const [manualQuestions, setManualQuestions] = useState<CustomExamQuestion[]>([
         { id: 1, type: 'mcq', marks: 1, question: '', options: ['', '', '', ''], correctAnswer: 'A', explanation: '' },
     ]);
 
     // AI Material state
     const [materialText, setMaterialText] = useState('');
-    const [questionCount, setQuestionCount] = useState(10);
-    const [totalMarks, setTotalMarks] = useState(10);
+    const [mcqCount, setMcqCount] = useState(8);
+    const [shortCount, setShortCount] = useState(2);
     const [difficulty, setDifficulty] = useState<ExamDifficulty>('normal');
     const [isGenerating, setIsGenerating] = useState(false);
     const [generateError, setGenerateError] = useState('');
-    const [materialPageCount, setMaterialPageCount] = useState(0);
+    const [materialFiles, setMaterialFiles] = useState<string[]>([]);
     const materialFileRef = useRef<HTMLInputElement>(null);
 
     // Exam / Subject Title state (Mandatory for tracking & AI Chatbot queries)
@@ -50,8 +53,11 @@ export function AssessmentSetupScreen({
     // Preview state
     const [previewExam, setPreviewExam] = useState<GeneratedExam | null>(null);
 
-    // ─── PDF Upload Handler ───
-    const handlePdfUpload = async (file: File, target: 'paper' | 'material') => {
+    // ─── Document Upload Handler (supports multiple files) ───
+    const handleDocUpload = async (files: FileList, target: 'paper' | 'material') => {
+        const fileArr = Array.from(files);
+        if (fileArr.length === 0) return;
+
         if (target === 'paper') {
             setIsUploading(true);
             setUploadError('');
@@ -60,20 +66,26 @@ export function AssessmentSetupScreen({
             setGenerateError('');
         }
 
-        const result = await uploadPdf(file);
+        const result = await uploadPdf(fileArr);
 
         if (result.success && result.text) {
+            const names = fileArr.map(f => f.name);
+            const note = result.failedFiles && result.failedFiles.length
+                ? ` (couldn't read: ${result.failedFiles.join(', ')})`
+                : '';
             if (target === 'paper') {
                 setExtractedText(result.text);
-                setPdfPageCount(result.pageCount || 0);
+                setPaperFiles(names);
                 setIsUploading(false);
+                if (note) setUploadError('Some files were skipped' + note);
             } else {
                 setMaterialText(result.text);
-                setMaterialPageCount(result.pageCount || 0);
+                setMaterialFiles(names);
                 setIsGenerating(false);
+                if (note) setGenerateError('Some files were skipped' + note);
             }
         } else {
-            const errMsg = result.error || 'Failed to read PDF';
+            const errMsg = result.error || 'Failed to read document(s)';
             if (target === 'paper') {
                 setUploadError(errMsg);
                 setIsUploading(false);
@@ -108,12 +120,18 @@ export function AssessmentSetupScreen({
             setGenerateError('Please enter a test/subject title (e.g. Physics Test 1)');
             return;
         }
+        if (mcqCount + shortCount < 1) {
+            setGenerateError('Please request at least one question.');
+            return;
+        }
         setIsGenerating(true);
         setGenerateError('');
 
+        const totalMarks = mcqCount * MARKS_PER_MCQ + shortCount * MARKS_PER_SHORT;
         const result = await generateExam({
             materialText,
-            questionCount,
+            mcqCount,
+            shortCount,
             totalMarks,
             difficulty,
         });
@@ -128,18 +146,12 @@ export function AssessmentSetupScreen({
     };
 
     // ─── Manual entry helpers ───
-    const addManualQuestion = () => {
+    const addManualQuestion = (type: CustomQuestionType) => {
         setManualQuestions(prev => [
             ...prev,
-            {
-                id: prev.length + 1,
-                type: 'mcq',
-                marks: 1,
-                question: '',
-                options: ['', '', '', ''],
-                correctAnswer: 'A',
-                explanation: '',
-            },
+            type === 'mcq'
+                ? { id: prev.length + 1, type: 'mcq', marks: 1, question: '', options: ['', '', '', ''], correctAnswer: 'A', explanation: '' }
+                : { id: prev.length + 1, type: 'short', marks: 3, question: '', options: [], keyPoints: [''], explanation: '' },
         ]);
     };
 
@@ -159,12 +171,26 @@ export function AssessmentSetupScreen({
         });
     };
 
+    const updateKeyPoint = (qIndex: number, kpIndex: number, value: string) => {
+        setManualQuestions(prev => {
+            const updated = [...prev];
+            const kp = [...(updated[qIndex].keyPoints || [])];
+            kp[kpIndex] = value;
+            updated[qIndex].keyPoints = kp;
+            return updated;
+        });
+    };
+
     const removeManualQuestion = (index: number) => {
         setManualQuestions(prev => prev.filter((_, i) => i !== index).map((q, i) => ({ ...q, id: i + 1 })));
     };
 
     const handleStartManualExam = () => {
-        const valid = manualQuestions.filter(q => q.question.trim() && q.options.every(o => o.trim()));
+        const valid = manualQuestions.filter(q => {
+            if (!q.question.trim()) return false;
+            if (q.type === 'mcq') return q.options.every(o => o.trim());
+            return true; // written questions only need a prompt
+        });
         if (valid.length === 0) return;
         const total = valid.reduce((sum, q) => sum + q.marks, 0);
         onStartCustomExam({
@@ -181,9 +207,12 @@ export function AssessmentSetupScreen({
         }
     };
 
+    const manualTotalMarks = manualQuestions.reduce((s, q) => s + q.marks, 0);
+    const genTotalMarks = mcqCount * MARKS_PER_MCQ + shortCount * MARKS_PER_SHORT;
+
     // ─── RENDER ──────────────────────────────────────────────────────────────────
 
-    // Preview Screen
+    // Preview Screen (answers are intentionally NOT revealed here)
     if (previewExam) {
         return (
             <section className="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
@@ -194,12 +223,15 @@ export function AssessmentSetupScreen({
                     <div className="text-center space-y-2">
                         <h1 className="text-3xl font-bold">📋 Exam Preview</h1>
                         <p className="text-white/60">{previewExam.examTitle}</p>
-                        <div className="flex items-center justify-center gap-4 text-sm">
+                        <div className="flex items-center justify-center gap-4 text-sm flex-wrap">
                             <span className="bg-primary-500/20 text-primary-300 px-3 py-1 rounded-full">
                                 {previewExam.questions.length} Questions
                             </span>
                             <span className="bg-accent-500/20 text-accent-300 px-3 py-1 rounded-full">
                                 {previewExam.totalMarks} Total Marks
+                            </span>
+                            <span className="bg-green-500/20 text-green-300 px-3 py-1 rounded-full">
+                                🔒 Answers hidden until you finish
                             </span>
                         </div>
                     </div>
@@ -211,22 +243,26 @@ export function AssessmentSetupScreen({
                                     <span className="bg-primary-500/20 text-primary-300 text-xs px-2 py-0.5 rounded-full shrink-0 mt-0.5">
                                         Q{i + 1} ({q.marks}m)
                                     </span>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 mt-0.5 ${q.type === 'short' ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-sky-500/20 text-sky-300'}`}>
+                                        {q.type === 'short' ? 'Written' : 'MCQ'}
+                                    </span>
                                     <p className="text-sm text-white/90">{q.question}</p>
                                 </div>
-                                <div className="grid grid-cols-2 gap-2 pl-8">
-                                    {q.options.map((opt, oi) => (
-                                        <div
-                                            key={oi}
-                                            className={`text-xs p-2 rounded-lg border ${
-                                                q.correctAnswer && opt.startsWith(q.correctAnswer)
-                                                    ? 'border-green-500/30 bg-green-500/10 text-green-300'
-                                                    : 'border-white/10 bg-white/5 text-white/60'
-                                            }`}
-                                        >
-                                            {opt}
-                                        </div>
-                                    ))}
-                                </div>
+                                {q.type === 'mcq' && q.options.length > 0 && (
+                                    <div className="grid grid-cols-2 gap-2 pl-8">
+                                        {q.options.map((opt, oi) => (
+                                            <div
+                                                key={oi}
+                                                className="text-xs p-2 rounded-lg border border-white/10 bg-white/5 text-white/60"
+                                            >
+                                                {opt}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {q.type === 'short' && (
+                                    <p className="pl-8 text-xs text-white/40 italic">✍️ Written answer required</p>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -306,7 +342,7 @@ export function AssessmentSetupScreen({
                                 <div className="space-y-1">
                                     <h3 className="font-bold text-xl">Custom Paper</h3>
                                     <p className="text-white/50 text-sm leading-relaxed">
-                                        Upload a PDF exam paper or manually enter your own questions, options, correct answers, and marks. The system digitizes and auto-grades it.
+                                        Upload one or more PDF/PPTX/DOCX exam papers, or manually enter MCQ and written questions. The system digitizes and grades it.
                                     </p>
                                     <span className="inline-block text-xs bg-accent-500/20 text-accent-300 px-2 py-0.5 rounded-full mt-1">
                                         Upload or Manual Entry
@@ -325,7 +361,7 @@ export function AssessmentSetupScreen({
                                 <div className="space-y-1">
                                     <h3 className="font-bold text-xl">AI Material-Based Exam</h3>
                                     <p className="text-white/50 text-sm leading-relaxed">
-                                        Upload study material or paste notes. AI generates a custom exam calibrated by Bloom's Taxonomy difficulty (Easy / Normal / Hard).
+                                        Upload one or more study files or paste notes. AI generates a custom mix of MCQ + written questions calibrated by Bloom's Taxonomy difficulty.
                                     </p>
                                     <span className="inline-block text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full mt-1">
                                         AI-Powered Generation
@@ -376,7 +412,7 @@ export function AssessmentSetupScreen({
                                 customMode === 'upload' ? 'bg-primary-500 text-white shadow-lg' : 'text-white/50 hover:text-white/80'
                             }`}
                         >
-                            📤 Upload PDF
+                            📤 Upload File(s)
                         </button>
                         <button
                             onClick={() => setCustomMode('manual')}
@@ -388,7 +424,7 @@ export function AssessmentSetupScreen({
                         </button>
                     </div>
 
-                    {/* Upload PDF Mode */}
+                    {/* Upload Mode */}
                     {customMode === 'upload' && (
                         <div className="space-y-4">
                             <div
@@ -398,29 +434,30 @@ export function AssessmentSetupScreen({
                                 <input
                                     ref={fileInputRef}
                                     type="file"
+                                    multiple
                                     accept=".pdf,.pptx,.ppt,.docx,.txt"
                                     className="hidden"
                                     onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) handlePdfUpload(file, 'paper');
+                                        if (e.target.files && e.target.files.length) handleDocUpload(e.target.files, 'paper');
                                     }}
                                 />
                                 {isUploading ? (
                                     <div className="space-y-2">
                                         <div className="text-4xl animate-spin">⏳</div>
-                                        <p className="text-white/60">Extracting text from document...</p>
+                                        <p className="text-white/60">Extracting text from document(s)...</p>
                                     </div>
-                                ) : extractedText ? (
+                                ) : paperFiles.length > 0 ? (
                                     <div className="space-y-2">
                                         <div className="text-4xl">✅</div>
-                                        <p className="text-green-300 font-semibold">Document Loaded ({pdfPageCount} pages / sections)</p>
-                                        <p className="text-white/40 text-xs">Click to replace with a different file</p>
+                                        <p className="text-green-300 font-semibold">{paperFiles.length} file{paperFiles.length > 1 ? 's' : ''} loaded</p>
+                                        <p className="text-white/50 text-xs break-words">{paperFiles.join(', ')}</p>
+                                        <p className="text-white/40 text-xs">Click to replace with different file(s)</p>
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
                                         <div className="text-4xl">📤</div>
-                                        <p className="text-white/70 font-medium">Click to upload PDF, PPTX slides, or DOCX exam paper</p>
-                                        <p className="text-white/40 text-xs">Supports PDF, PowerPoint (.pptx), Word (.docx), TXT (Max 15MB)</p>
+                                        <p className="text-white/70 font-medium">Click to upload one or more exam papers</p>
+                                        <p className="text-white/40 text-xs">Select multiple: PDF, PowerPoint (.pptx), Word (.docx), TXT (Max 15MB each)</p>
                                     </div>
                                 )}
                             </div>
@@ -447,8 +484,14 @@ export function AssessmentSetupScreen({
                             )}
 
                             {uploadError && (
-                                <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl p-3">
-                                    ⚠️ {uploadError}
+                                <div className="glass-card p-4 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl space-y-2 text-sm">
+                                    <div className="flex items-center gap-2 font-bold text-amber-300">
+                                        <span className="text-xl">🤖</span> AITA AI Assistant Guidance
+                                    </div>
+                                    <p className="text-white/80 text-xs leading-relaxed">{uploadError.replace(/^🤖\s*AITA\s*AI\s*Assistant:\s*/i, '')}</p>
+                                    <div className="text-[11px] text-white/50 pt-1 border-t border-amber-500/20">
+                                        💡 <strong>Tip for Teachers:</strong> If your photo is dim or blurry, use a document scanner app like <strong>CamScanner</strong> or <strong>Adobe Scan</strong> for a sharp, high-contrast shot, or convert/type the content into a PDF, Word, or TXT file.
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -459,14 +502,19 @@ export function AssessmentSetupScreen({
                         <div className="space-y-4">
                             {manualQuestions.map((q, qi) => (
                                 <div key={qi} className="glass-card p-4 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <h3 className="font-semibold text-sm text-primary-300">Question {qi + 1}</h3>
+                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="font-semibold text-sm text-primary-300">Question {qi + 1}</h3>
+                                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${q.type === 'short' ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-sky-500/20 text-sky-300'}`}>
+                                                {q.type === 'short' ? 'Written' : 'MCQ'}
+                                            </span>
+                                        </div>
                                         <div className="flex items-center gap-2">
                                             <label className="text-xs text-white/40">Marks:</label>
                                             <input
                                                 type="number"
                                                 min={1}
-                                                max={10}
+                                                max={20}
                                                 value={q.marks}
                                                 onChange={(e) => updateManualQuestion(qi, 'marks', parseInt(e.target.value) || 1)}
                                                 className="text-input !w-16 !py-1 text-center text-sm"
@@ -490,51 +538,83 @@ export function AssessmentSetupScreen({
                                         className="text-input text-sm"
                                     />
 
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {['A', 'B', 'C', 'D'].map((letter, oi) => (
-                                            <input
-                                                key={letter}
-                                                type="text"
-                                                placeholder={`${letter}) Option...`}
-                                                value={q.options[oi]}
-                                                onChange={(e) => updateManualOption(qi, oi, e.target.value)}
-                                                className="text-input text-sm"
-                                            />
-                                        ))}
-                                    </div>
+                                    {q.type === 'mcq' ? (
+                                        <>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {['A', 'B', 'C', 'D'].map((letter, oi) => (
+                                                    <input
+                                                        key={letter}
+                                                        type="text"
+                                                        placeholder={`${letter}) Option...`}
+                                                        value={q.options[oi]}
+                                                        onChange={(e) => updateManualOption(qi, oi, e.target.value)}
+                                                        className="text-input text-sm"
+                                                    />
+                                                ))}
+                                            </div>
 
-                                    <div className="flex items-center gap-3">
-                                        <label className="text-xs text-white/40">Correct Answer:</label>
-                                        <div className="flex gap-2">
-                                            {['A', 'B', 'C', 'D'].map((letter) => (
-                                                <button
-                                                    key={letter}
-                                                    onClick={() => updateManualQuestion(qi, 'correctAnswer', letter)}
-                                                    className={`w-8 h-8 rounded-lg text-sm font-bold transition-all ${
-                                                        q.correctAnswer === letter
-                                                            ? 'bg-green-500 text-white shadow-lg'
-                                                            : 'bg-white/10 text-white/50 hover:bg-white/20'
-                                                    }`}
-                                                >
-                                                    {letter}
-                                                </button>
+                                            <div className="flex items-center gap-3">
+                                                <label className="text-xs text-white/40">Correct Answer:</label>
+                                                <div className="flex gap-2">
+                                                    {['A', 'B', 'C', 'D'].map((letter) => (
+                                                        <button
+                                                            key={letter}
+                                                            onClick={() => updateManualQuestion(qi, 'correctAnswer', letter)}
+                                                            className={`w-8 h-8 rounded-lg text-sm font-bold transition-all ${
+                                                                q.correctAnswer === letter
+                                                                    ? 'bg-green-500 text-white shadow-lg'
+                                                                    : 'bg-white/10 text-white/50 hover:bg-white/20'
+                                                            }`}
+                                                        >
+                                                            {letter}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <label className="text-xs text-white/40">Model answer key points (used for AI grading)</label>
+                                            {(q.keyPoints || ['']).map((kp, ki) => (
+                                                <input
+                                                    key={ki}
+                                                    type="text"
+                                                    placeholder={`Key point ${ki + 1}...`}
+                                                    value={kp}
+                                                    onChange={(e) => updateKeyPoint(qi, ki, e.target.value)}
+                                                    className="text-input text-sm"
+                                                />
                                             ))}
+                                            <button
+                                                onClick={() => updateManualQuestion(qi, 'keyPoints', [...(q.keyPoints || []), ''])}
+                                                className="text-xs text-primary-300 hover:text-primary-200"
+                                            >
+                                                + Add key point
+                                            </button>
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
                             ))}
 
-                            <button
-                                onClick={addManualQuestion}
-                                className="w-full glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
-                            >
-                                + Add Question
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => addManualQuestion('mcq')}
+                                    className="flex-1 glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
+                                >
+                                    + Add MCQ
+                                </button>
+                                <button
+                                    onClick={() => addManualQuestion('short')}
+                                    className="flex-1 glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
+                                >
+                                    + Add Written Question
+                                </button>
+                            </div>
 
-                            <div className="glass-card p-4 flex items-center justify-between">
+                            <div className="glass-card p-4 flex items-center justify-between flex-wrap gap-2">
                                 <div className="text-sm text-white/60">
                                     <span className="font-semibold text-white">{manualQuestions.length}</span> questions •{' '}
-                                    <span className="font-semibold text-white">{manualQuestions.reduce((s, q) => s + q.marks, 0)}</span> total marks
+                                    <span className="font-semibold text-white">{manualTotalMarks}</span> total marks
                                 </div>
                                 <button
                                     onClick={handleStartManualExam}
@@ -589,24 +669,25 @@ export function AssessmentSetupScreen({
                             <input
                                 ref={materialFileRef}
                                 type="file"
+                                multiple
                                 accept=".pdf,.pptx,.ppt,.docx,.txt"
                                 className="hidden"
                                 onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) handlePdfUpload(file, 'material');
+                                    if (e.target.files && e.target.files.length) handleDocUpload(e.target.files, 'material');
                                 }}
                             />
-                            {materialPageCount > 0 ? (
+                            {materialFiles.length > 0 ? (
                                 <div className="space-y-1">
                                     <div className="text-3xl">✅</div>
-                                    <p className="text-green-300 font-semibold text-sm">Material Document Loaded ({materialPageCount} pages / slides)</p>
+                                    <p className="text-green-300 font-semibold text-sm">{materialFiles.length} file{materialFiles.length > 1 ? 's' : ''} loaded</p>
+                                    <p className="text-white/50 text-xs break-words">{materialFiles.join(', ')}</p>
                                     <p className="text-white/40 text-xs">Click to replace</p>
                                 </div>
                             ) : (
                                 <div className="space-y-1">
                                     <div className="text-3xl">📤</div>
-                                    <p className="text-white/70 font-medium text-sm">Upload study material (PDF, PPTX Slides, DOCX)</p>
-                                    <p className="text-white/40 text-xs">Or paste text below</p>
+                                    <p className="text-white/70 font-medium text-sm">Upload one or more study files (PDF, PPTX, DOCX)</p>
+                                    <p className="text-white/40 text-xs">Select multiple, or paste text below</p>
                                 </div>
                             )}
                         </div>
@@ -628,37 +709,50 @@ export function AssessmentSetupScreen({
                     <div className="glass-card p-5 space-y-5">
                         <h3 className="font-semibold">⚙️ Exam Configuration</h3>
 
-                        {/* Question Count */}
+                        {/* MCQ Count */}
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
-                                <label className="text-sm text-white/70">Number of Questions</label>
-                                <span className="text-lg font-bold text-primary-300">{questionCount}</span>
+                                <label className="text-sm text-white/70">Multiple-Choice Questions (MCQ)</label>
+                                <span className="text-lg font-bold text-sky-300">{mcqCount}</span>
                             </div>
                             <input
                                 type="range"
-                                min={3}
+                                min={0}
                                 max={25}
-                                value={questionCount}
-                                onChange={(e) => setQuestionCount(parseInt(e.target.value))}
+                                value={mcqCount}
+                                onChange={(e) => setMcqCount(parseInt(e.target.value))}
                                 className="w-full accent-primary-500"
                             />
                             <div className="flex justify-between text-xs text-white/30">
-                                <span>3</span>
-                                <span>25</span>
+                                <span>0</span><span>25</span>
                             </div>
                         </div>
 
-                        {/* Total Marks */}
+                        {/* Written Count */}
                         <div className="space-y-2">
-                            <label className="text-sm text-white/70">Total Marks</label>
+                            <div className="flex items-center justify-between">
+                                <label className="text-sm text-white/70">Written / Short-Answer Questions</label>
+                                <span className="text-lg font-bold text-fuchsia-300">{shortCount}</span>
+                            </div>
                             <input
-                                type="number"
-                                min={questionCount}
-                                max={100}
-                                value={totalMarks}
-                                onChange={(e) => setTotalMarks(parseInt(e.target.value) || questionCount)}
-                                className="text-input text-sm !w-32"
+                                type="range"
+                                min={0}
+                                max={10}
+                                value={shortCount}
+                                onChange={(e) => setShortCount(parseInt(e.target.value))}
+                                className="w-full accent-fuchsia-500"
                             />
+                            <div className="flex justify-between text-xs text-white/30">
+                                <span>0</span><span>10</span>
+                            </div>
+                        </div>
+
+                        {/* Totals summary */}
+                        <div className="flex items-center gap-3 text-sm text-white/60 bg-white/5 rounded-xl p-3 flex-wrap">
+                            <span><span className="font-semibold text-white">{mcqCount + shortCount}</span> questions</span>
+                            <span className="text-white/20">|</span>
+                            <span><span className="font-semibold text-white">{genTotalMarks}</span> total marks</span>
+                            <span className="text-white/30 text-xs ml-auto">MCQ {MARKS_PER_MCQ}m · Written {MARKS_PER_SHORT}m each</span>
                         </div>
 
                         {/* Difficulty */}
@@ -689,21 +783,24 @@ export function AssessmentSetupScreen({
                     </div>
 
                     {generateError && (
-                        <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl p-3">
-                            ⚠️ {generateError}
+                        <div className="glass-card p-4 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl space-y-2 text-sm">
+                            <div className="flex items-center gap-2 font-bold text-amber-300">
+                                <span className="text-xl">🤖</span> AITA AI Assistant Guidance
+                            </div>
+                            <p className="text-white/80 text-xs leading-relaxed">{generateError.replace(/^🤖\s*AITA\s*AI\s*Assistant:\s*/i, '')}</p>
                         </div>
                     )}
 
                     {/* Generate Button */}
                     <button
                         onClick={handleGenerateExam}
-                        disabled={isGenerating || materialText.trim().length < 20}
+                        disabled={isGenerating || materialText.trim().length < 20 || (mcqCount + shortCount < 1)}
                         className="btn-primary w-full !py-4 text-lg disabled:opacity-50"
                     >
                         {isGenerating ? (
                             <><span className="animate-spin">🤖</span> AI is generating your exam...</>
                         ) : (
-                            <>🚀 Generate {questionCount}-Question Exam</>
+                            <>🚀 Generate {mcqCount + shortCount}-Question Exam</>
                         )}
                     </button>
                 </div>

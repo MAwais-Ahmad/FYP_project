@@ -278,9 +278,12 @@ export async function fetchRecordsByName(name: string): Promise<any[]> {
 
 // ─── DYNAMIC ASSESSMENT API ──────────────────────────────────────────────────
 
-export async function uploadPdf(file: File): Promise<{ success: boolean; text?: string; pageCount?: number; error?: string }> {
+export async function uploadPdf(
+    files: File | File[]
+): Promise<{ success: boolean; text?: string; pageCount?: number; fileCount?: number; failedFiles?: string[]; error?: string }> {
     const formData = new FormData();
-    formData.append('pdf', file);
+    const list = Array.isArray(files) ? files : [files];
+    list.forEach(f => formData.append('pdf', f));
     try {
         const token = getToken();
         const headers: Record<string, string> = {};
@@ -292,13 +295,14 @@ export async function uploadPdf(file: File): Promise<{ success: boolean; text?: 
         });
         return response.json();
     } catch {
-        return { success: false, error: 'Network error uploading PDF' };
+        return { success: false, error: 'Network error uploading document(s)' };
     }
 }
 
 export async function generateExam(config: {
     materialText: string;
-    questionCount: number;
+    mcqCount: number;
+    shortCount: number;
     totalMarks: number;
     difficulty: string;
 }): Promise<{ success: boolean; exam?: any; error?: string }> {
@@ -311,6 +315,23 @@ export async function generateExam(config: {
         return response.json();
     } catch {
         return { success: false, error: 'Network error generating exam' };
+    }
+}
+
+export async function gradeExam(payload: {
+    examId?: string;
+    exam?: any;
+    answers: Record<number, string | string[]>;
+}): Promise<{ success: boolean; result?: any; error?: string }> {
+    try {
+        const response = await fetch(`${API_BASE}/grade-exam`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(payload),
+        });
+        return response.json();
+    } catch {
+        return { success: false, error: 'Network error grading exam' };
     }
 }
 

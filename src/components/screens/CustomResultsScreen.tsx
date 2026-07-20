@@ -9,7 +9,11 @@ interface CustomResultsScreenProps {
 }
 
 export function CustomResultsScreen({ results, onRestart, onViewDashboard }: CustomResultsScreenProps) {
-    const { examTitle, totalMarks, obtainedMarks, percentage, totalTime, avgTimePerQuestion, questions, selectedAnswers, questionTimes, revisionCounts, totalRevisions } = results;
+    const {
+        examTitle, totalMarks, obtainedMarks, percentage, totalTime, avgTimePerQuestion,
+        questions, graded, selectedAnswers, questionTimes, revisionCounts, totalRevisions,
+        cognitive: serverCognitive, mcqMarks, shortMarks,
+    } = results;
 
     const formatTime = (seconds: number) => {
         const m = Math.floor(seconds / 60);
@@ -17,8 +21,14 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
         return m > 0 ? `${m}m ${s}s` : `${s}s`;
     };
 
-    const skippedCount = questions.length - Object.keys(selectedAnswers).length;
-    const accuracyScore = obtainedMarks / Math.max(1, totalMarks);
+    const gradedById: Record<number, { awardedMarks: number; correct?: boolean; feedback?: string }> = {};
+    (graded || []).forEach(g => { gradedById[g.id] = g; });
+
+    const answeredIds = Object.entries(selectedAnswers).filter(([, v]) => v && v.toString().trim().length > 0).map(([k]) => Number(k));
+    const skippedCount = questions.length - answeredIds.length;
+    const accuracyScore = totalMarks > 0 ? obtainedMarks / totalMarks : 0;
+
+    const hasWritten = questions.some(q => q.type === 'short');
 
     // Compute dynamic item-level timing metrics from questionTimes
     const times = Object.values(questionTimes);
@@ -55,7 +65,7 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
         overthinkingCount: overthinkingVal,
         totalAnswerChanges: totalRevisions,
         backtrackCount: 0,
-        questionsAnswered: Object.keys(selectedAnswers).length,
+        questionsAnswered: answeredIds.length,
         totalResponseLength: 0,
         skippedQuestions: skippedCount,
         overtimeCount: overtimeVal,
@@ -63,7 +73,11 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
         decisionStyle: meanTime < 25 ? 'impulsive' : meanTime > 60 ? 'deliberate' : 'balanced',
     };
 
-    const cognitive = heuristicCognitiveFeatures(selectedAnswers as any, [], overallMetrics);
+    // Prefer the AI's cumulative cognitive evaluation of the WRITTEN answers.
+    // Fall back to the behavioral heuristic for pure-MCQ exams (no written text).
+    const cognitive = (hasWritten && serverCognitive)
+        ? serverCognitive
+        : heuristicCognitiveFeatures(selectedAnswers as any, [], overallMetrics);
     const confidence = calculateDynamicConfidence(overallMetrics, accuracyScore, '');
 
     // Full multi-dimensional classification engine call
@@ -108,6 +122,11 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
                             <div className={`text-2xl font-bold ${scoreColor}`}>
                                 {percentage}%
                             </div>
+                            {hasWritten && (
+                                <p className="text-xs text-white/40">
+                                    MCQ: {mcqMarks} marks · Written: {shortMarks} marks
+                                </p>
+                            )}
                         </div>
 
                         <div className="text-center p-4 rounded-2xl bg-white/5 border border-white/10 max-w-xs">
@@ -134,6 +153,38 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
                         </div>
                     )}
                 </div>
+
+                {/* Cognitive breakdown from written answers */}
+                {hasWritten && serverCognitive && (
+                    <div className="glass-card p-5 space-y-3">
+                        <h2 className="text-lg font-bold">🧠 Written-Answer Cognitive Analysis</h2>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {([
+                                { key: 'reflection_depth', label: 'Reflection Depth' },
+                                { key: 'self_awareness', label: 'Self-Awareness' },
+                                { key: 'learning_orientation', label: 'Learning Orientation' },
+                                { key: 'creativity_score', label: 'Creativity' },
+                            ] as const).map(m => (
+                                <div key={m.key} className="bg-white/5 rounded-xl p-3 text-center">
+                                    <p className="text-2xl font-bold text-primary-300">
+                                        {Math.round((serverCognitive as any)[m.key] * 100)}%
+                                    </p>
+                                    <p className="text-[10px] text-white/40 mt-1">{m.label}</p>
+                                </div>
+                            ))}
+                        </div>
+                        {serverCognitive.insights && serverCognitive.insights.length > 0 && (
+                            <ul className="text-xs text-white/60 space-y-1 pt-2 border-t border-white/10">
+                                {serverCognitive.insights.map((ins, i) => (
+                                    <li key={i} className="flex items-start gap-2">
+                                        <span className="text-primary-400">•</span>
+                                        <span>{ins}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                )}
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -162,67 +213,93 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
                     <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                         {questions.map((q, i) => {
                             const selected = selectedAnswers[q.id];
-                            const isCorrect = selected === q.correctAnswer;
-                            const isSkipped = !selected;
+                            const g = gradedById[q.id];
+                            const awarded = g ? g.awardedMarks : 0;
+                            const isSkipped = !selected || selected.toString().trim().length === 0;
+                            const isWritten = q.type === 'short';
+                            const fullMarks = awarded >= q.marks && !isSkipped;
+                            const partial = awarded > 0 && awarded < q.marks;
                             const timeSpent = questionTimes[q.id] || 0;
                             const revisions = revisionCounts[q.id] || 0;
 
+                            const borderTone = isSkipped
+                                ? 'border-yellow-500/20 bg-yellow-500/5'
+                                : fullMarks
+                                ? 'border-green-500/20 bg-green-500/5'
+                                : partial
+                                ? 'border-amber-500/20 bg-amber-500/5'
+                                : 'border-red-500/20 bg-red-500/5';
+
                             return (
-                                <div
-                                    key={q.id}
-                                    className={`p-4 rounded-xl border space-y-3 ${
-                                        isSkipped
-                                            ? 'border-yellow-500/20 bg-yellow-500/5'
-                                            : isCorrect
-                                            ? 'border-green-500/20 bg-green-500/5'
-                                            : 'border-red-500/20 bg-red-500/5'
-                                    }`}
-                                >
+                                <div key={q.id} className={`p-4 rounded-xl border space-y-3 ${borderTone}`}>
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="flex items-start gap-2 flex-1">
-                                            <span className={`text-lg mt-0.5 ${isSkipped ? '' : isCorrect ? '' : ''}`}>
-                                                {isSkipped ? '⏭️' : isCorrect ? '✅' : '❌'}
+                                            <span className="text-lg mt-0.5">
+                                                {isSkipped ? '⏭️' : fullMarks ? '✅' : partial ? '🟡' : '❌'}
                                             </span>
                                             <div className="flex-1">
                                                 <p className="text-sm font-medium">
                                                     <span className="text-white/40">Q{i + 1}.</span> {q.question}
+                                                    <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${isWritten ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-sky-500/20 text-sky-300'}`}>
+                                                        {isWritten ? 'Written' : 'MCQ'}
+                                                    </span>
                                                 </p>
                                             </div>
                                         </div>
                                         <div className="text-right shrink-0">
-                                            <span className={`text-sm font-bold ${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
-                                                {isCorrect ? q.marks : 0}/{q.marks}
+                                            <span className={`text-sm font-bold ${fullMarks ? 'text-green-400' : partial ? 'text-amber-400' : 'text-red-400'}`}>
+                                                {awarded}/{q.marks}
                                             </span>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-2 pl-7">
-                                        {q.options.map((opt, oi) => {
-                                            const optLetter = opt.charAt(0);
-                                            const isSelectedOpt = selected === optLetter;
-                                            const isCorrectOpt = q.correctAnswer === optLetter;
+                                    {/* MCQ option review */}
+                                    {!isWritten && (
+                                        <div className="grid grid-cols-2 gap-2 pl-7">
+                                            {q.options.map((opt, oi) => {
+                                                const optLetter = opt.charAt(0);
+                                                const isSelectedOpt = selected === optLetter;
+                                                const isCorrectOpt = q.correctAnswer === optLetter;
 
-                                            let optClass = 'border-white/5 bg-white/5 text-white/50';
-                                            if (isCorrectOpt) optClass = 'border-green-500/30 bg-green-500/10 text-green-300';
-                                            if (isSelectedOpt && !isCorrectOpt) optClass = 'border-red-500/30 bg-red-500/10 text-red-300 line-through';
+                                                let optClass = 'border-white/5 bg-white/5 text-white/50';
+                                                if (isCorrectOpt) optClass = 'border-green-500/30 bg-green-500/10 text-green-300';
+                                                if (isSelectedOpt && !isCorrectOpt) optClass = 'border-red-500/30 bg-red-500/10 text-red-300 line-through';
 
-                                            return (
-                                                <div
-                                                    key={oi}
-                                                    className={`text-xs p-2 rounded-lg border ${optClass}`}
-                                                >
-                                                    {opt}
-                                                    {isCorrectOpt && <span className="ml-1">✓</span>}
-                                                    {isSelectedOpt && !isCorrectOpt && <span className="ml-1">✗</span>}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                                                return (
+                                                    <div key={oi} className={`text-xs p-2 rounded-lg border ${optClass}`}>
+                                                        {opt}
+                                                        {isCorrectOpt && <span className="ml-1">✓</span>}
+                                                        {isSelectedOpt && !isCorrectOpt && <span className="ml-1">✗</span>}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {/* Written answer review */}
+                                    {isWritten && (
+                                        <div className="pl-7 space-y-2">
+                                            <div className="text-xs bg-white/5 rounded-lg p-3 border border-white/10">
+                                                <p className="text-white/40 mb-1">Your answer:</p>
+                                                <p className="text-white/80 whitespace-pre-wrap">
+                                                    {isSkipped ? <span className="italic text-white/30">(no answer)</span> : selected}
+                                                </p>
+                                            </div>
+                                            {g?.feedback && (
+                                                <p className="text-xs text-accent-300">
+                                                    🧑‍🏫 {g.feedback}
+                                                </p>
+                                            )}
+                                            {q.keyPoints && q.keyPoints.length > 0 && (
+                                                <p className="text-[11px] text-white/40">
+                                                    Expected key points: {q.keyPoints.join('; ')}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {q.explanation && (
-                                        <p className="text-xs text-white/40 pl-7 italic">
-                                            💡 {q.explanation}
-                                        </p>
+                                        <p className="text-xs text-white/40 pl-7 italic">💡 {q.explanation}</p>
                                     )}
 
                                     <div className="flex items-center gap-3 pl-7 text-[10px] text-white/30">

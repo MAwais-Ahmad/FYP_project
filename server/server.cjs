@@ -727,96 +727,252 @@ function getAdaptiveContext(difficultySignal, scenarioNumber) {
 
 // ─── DYNAMIC ASSESSMENT ENDPOINTS ────────────────────────────────────────────
 const multer = require('multer');
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse');
 const officeParser = require('officeparser');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } }); // 15MB max
 
-// Upload Document (PDF, PPTX Slides, DOCX, TXT) → Extract text locally ($0 cost)
-app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
+// Below this many characters of extracted text, treat the page/slide as image-only
+// (scanned PDF, slide screenshots, etc.) and retry extraction with OCR.
+const MIN_USABLE_TEXT_LENGTH = 40;
+
+// Extensions officeparser can be told about explicitly (bypasses its magic-byte
+// sniffing, which can misidentify a PPTX/DOCX — both are zip containers — as a
+// plain "zip" file when the exporter didn't lay out the archive the way the
+// sniffer expects).
+const OFFICEPARSER_FILE_TYPES = new Set(['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'pdf', 'rtf', 'md', 'html', 'csv', 'epub']);
+
+function officeParserFileTypeHint(filename) {
+  const ext = filename.slice(filename.lastIndexOf('.') + 1);
+  return OFFICEPARSER_FILE_TYPES.has(ext) ? ext : undefined;
+}
+
+// Unified extractor for PPTX/DOCX/PDF via officeparser's AST parser.
+// ocr:true rasterizes each page/slide and runs Tesseract OCR on it — much slower,
+// so it's only used as a fallback when the fast text-layer extraction comes up empty.
+async function extractWithOfficeParser(buffer, { ocr, fileType } = {}) {
   try {
-    if (!req.file) {
+    const ast = await officeParser.parseOffice(buffer, { ocr: !!ocr, fileType: fileType || null });
+    return {
+      text: ast ? ast.toText() : '',
+      pageCount: ast && Array.isArray(ast.content) && ast.content.length > 0 ? ast.content.length : 1,
+    };
+  } catch (err) {
+    console.warn('⚠️ officeParser error:', err.message || err);
+    return { text: '', pageCount: 1 };
+  }
+}
+
+// Extract text from a single uploaded file buffer (PDF/PPTX/DOCX/TXT), with an
+// OCR fallback for image-only pages. Returns { text, pageCount }.
+async function extractDocumentText(originalname, buffer) {
+  const filename = (originalname || '').toLowerCase();
+
+  if (filename.endsWith('.txt')) {
+    return { text: buffer.toString('utf8'), pageCount: 1 };
+  }
+
+  if (filename.endsWith('.pdf')) {
+    // Fast path: read the PDF's embedded text layer directly (no rendering/OCR).
+    let extractedText = '';
+    let pageCount = 1;
+    let parser;
+    try {
+      parser = new PDFParse({ data: buffer });
+      const data = await parser.getText();
+      extractedText = data.text || '';
+      pageCount = data.total || 1;
+    } catch (err) {
+      console.warn('⚠️ pdf-parse failed, will retry with OCR:', err.message);
+    } finally {
+      if (parser) await parser.destroy();
+    }
+
+    // Fallback for scanned/image-only PDFs: re-extract with OCR.
+    if (extractedText.trim().length < MIN_USABLE_TEXT_LENGTH) {
+      const ocrResult = await extractWithOfficeParser(buffer, { ocr: true, fileType: 'pdf' });
+      extractedText = ocrResult.text;
+      pageCount = ocrResult.pageCount;
+    }
+    return { text: extractedText, pageCount };
+  }
+
+  // PPTX/PPT/DOCX: try the fast text-layer path first.
+  const fileType = officeParserFileTypeHint(filename);
+  const result = await extractWithOfficeParser(buffer, { ocr: false, fileType });
+
+  // Fallback for slides/pages that are just embedded images (screenshots, scans).
+  if (result.text.trim().length < MIN_USABLE_TEXT_LENGTH) {
+    return extractWithOfficeParser(buffer, { ocr: true, fileType });
+  }
+  return result;
+}
+
+// Upload one OR MORE documents (PDF, PPTX Slides, DOCX, TXT) → Extract text
+// locally ($0 cost) and concatenate. Accepts multiple files under the "pdf" field.
+app.post('/api/upload-pdf', upload.array('pdf', 10), async (req, res) => {
+  try {
+    const files = req.files || [];
+    if (files.length === 0) {
       return res.status(400).json({ success: false, error: 'No document file uploaded' });
     }
 
-    const filename = (req.file.originalname || '').toLowerCase();
-    let extractedText = '';
-    let pageCount = 1;
+    const parts = [];
+    let totalPageCount = 0;
+    const failed = [];
 
-    if (filename.endsWith('.pptx') || filename.endsWith('.ppt') || filename.endsWith('.docx')) {
-      // Extract PowerPoint slides or Word docs using officeparser
-      extractedText = await officeParser.parseOfficeAsync(req.file.buffer);
-      const slideMatches = extractedText.match(/slide\s*\d+/gi);
-      pageCount = slideMatches ? slideMatches.length : Math.max(1, Math.ceil(extractedText.length / 500));
-    } else if (filename.endsWith('.txt')) {
-      extractedText = req.file.buffer.toString('utf8');
-      pageCount = 1;
-    } else {
-      // Default: pdf-parse for PDF documents and slides
+    for (const file of files) {
       try {
-        const data = await pdfParse(req.file.buffer);
-        extractedText = data.text;
-        pageCount = data.numpages || 1;
-      } catch {
-        // Fallback to officeParser if PDF has custom office formatting
-        extractedText = await officeParser.parseOfficeAsync(req.file.buffer);
-        pageCount = 1;
+        const { text, pageCount } = await extractDocumentText(file.originalname, file.buffer);
+        if (text && text.trim().length > 0) {
+          // Label each document so the AI can tell multi-file material apart.
+          const header = files.length > 1 ? `\n\n===== SOURCE: ${file.originalname} =====\n\n` : '';
+          parts.push(header + text.trim());
+          totalPageCount += pageCount || 1;
+        } else {
+          failed.push(file.originalname);
+        }
+      } catch (err) {
+        console.warn(`⚠️ Failed to extract "${file.originalname}":`, err.message);
+        failed.push(file.originalname);
       }
+    }
+
+    const combinedText = parts.join('\n\n');
+    if (!combinedText || combinedText.trim().length === 0) {
+      return res.status(422).json({
+        success: false,
+        error: '🤖 AITA AI Assistant: No readable text detected in the uploaded file(s). If a photo is blurry or dim, use CamScanner or Adobe Scan for a sharp shot, or upload a digital PDF, DOCX, PPTX, or TXT file.',
+      });
     }
 
     res.json({
       success: true,
-      text: extractedText,
-      pageCount,
+      text: combinedText,
+      pageCount: totalPageCount || 1,
+      fileCount: parts.length,
+      failedFiles: failed,
     });
   } catch (err) {
     console.error('Document parse error:', err.message);
-    res.status(500).json({ success: false, error: 'Failed to parse file. Ensure it is a valid PDF, PPTX slides, or DOCX document.' });
+    res.status(422).json({
+      success: false,
+      error: '🤖 AITA AI Assistant: Unable to process these files. If a picture is blurry or dim, try capturing it with CamScanner for a crisp shot, or upload a digital PDF/Word document.',
+    });
   }
 });
 
-// Generate exam from material text using AI
+// ─── EXAM STORE (leak-free grading) ───────────────────────────────────────────
+// Full exams (WITH answer key) are kept server-side, keyed by examId. The client
+// only ever receives a stripped copy, so the correct answers cannot be read
+// before the student submits.
+const examStore = new Map();
+const EXAM_STORE_MAX = 500;
+
+function storeExam(fullExam) {
+  const examId = crypto.randomUUID();
+  if (examStore.size >= EXAM_STORE_MAX) {
+    const oldest = examStore.keys().next().value; // Map preserves insertion order
+    examStore.delete(oldest);
+  }
+  examStore.set(examId, { exam: fullExam, createdAt: Date.now() });
+  return examId;
+}
+
+// Normalize raw AI/parser question objects into a consistent, validated shape.
+function normalizeExamQuestions(rawQuestions) {
+  if (!Array.isArray(rawQuestions)) return [];
+  return rawQuestions
+    .map((q, i) => {
+      const type = q.type === 'short' ? 'short' : 'mcq';
+      const marks = Math.max(1, parseInt(q.marks, 10) || 1);
+      const question = String(q.question || '').trim();
+      if (type === 'short') {
+        return {
+          id: i + 1,
+          type: 'short',
+          marks,
+          question,
+          options: [],
+          keyPoints: Array.isArray(q.keyPoints) ? q.keyPoints.map(String) : [],
+          explanation: q.explanation ? String(q.explanation) : '',
+        };
+      }
+      return {
+        id: i + 1,
+        type: 'mcq',
+        marks,
+        question,
+        options: Array.isArray(q.options) ? q.options.map(String) : [],
+        correctAnswer: (q.correctAnswer || '').toString().trim().charAt(0).toUpperCase(),
+        explanation: q.explanation ? String(q.explanation) : '',
+      };
+    })
+    .filter(q => q.question.length > 0 && (q.type === 'short' || q.options.length >= 2));
+}
+
+// Strip answer-key fields before sending an exam to the client.
+function stripExamForClient(fullExam, examId) {
+  return {
+    examId,
+    examTitle: fullExam.examTitle,
+    totalMarks: fullExam.totalMarks,
+    questions: fullExam.questions.map(q => ({
+      id: q.id,
+      type: q.type,
+      marks: q.marks,
+      question: q.question,
+      options: q.options || [],
+    })),
+  };
+}
+
+const DIFFICULTY_INSTRUCTIONS = {
+  easy: 'Focus 80% on direct recall, definitions, and basic facts. 20% on simple application. Questions should test surface-level understanding.',
+  normal: 'Balance 50% core concept questions with 50% application/scenario-based questions. Test both understanding and ability to apply knowledge.',
+  hard: 'Focus 20% on foundational constraints and 80% on critical analysis, multi-step reasoning, edge cases, and synthesis across topics. Questions should challenge deep understanding.',
+};
+
+// Generate exam from material text using AI — supports a mix of MCQ + written
+// (short-answer) questions.
 app.post('/api/generate-exam', async (req, res) => {
   try {
-    const { materialText, questionCount = 10, totalMarks = 10, difficulty = 'normal' } = req.body;
+    let { materialText, mcqCount, shortCount, questionCount, totalMarks, difficulty = 'normal' } = req.body;
+
+    // Backward-compat: an old client sending only questionCount → treat as all MCQ.
+    mcqCount = Number.isFinite(mcqCount) ? mcqCount : (Number.isFinite(questionCount) ? questionCount : 10);
+    shortCount = Number.isFinite(shortCount) ? shortCount : 0;
+    mcqCount = Math.max(0, Math.min(30, Math.round(mcqCount)));
+    shortCount = Math.max(0, Math.min(15, Math.round(shortCount)));
+
+    if (mcqCount + shortCount < 1) {
+      return res.status(400).json({ success: false, error: 'Please request at least one question.' });
+    }
     if (!materialText || materialText.trim().length < 20) {
       return res.status(400).json({ success: false, error: 'Please provide study material text (at least 20 characters).' });
     }
 
-    const difficultyInstructions = {
-      easy: 'Focus 80% on direct recall, definitions, and basic facts. 20% on simple application. Questions should test surface-level understanding.',
-      normal: 'Balance 50% core concept questions with 50% application/scenario-based questions. Test both understanding and ability to apply knowledge.',
-      hard: 'Focus 20% on foundational constraints and 80% on critical analysis, multi-step reasoning, edge cases, and synthesis across topics. Questions should challenge deep understanding.',
-    };
+    const marksPerMcq = 1;
+    const marksPerShort = 3;
+    const computedTotal = mcqCount * marksPerMcq + shortCount * marksPerShort;
 
-    const marksPerQuestion = Math.max(1, Math.round(totalMarks / questionCount));
+    const prompt = `You are an expert exam generator. Based ONLY on the following study material, generate exactly ${mcqCount} multiple-choice question(s) (MCQ) and exactly ${shortCount} written short-answer question(s).
 
-    const prompt = `You are an expert exam generator. Based on the following study material, generate exactly ${questionCount} multiple-choice questions (MCQs).
-
-DIFFICULTY LEVEL: ${difficulty.toUpperCase()}
-${difficultyInstructions[difficulty] || difficultyInstructions.normal}
+DIFFICULTY LEVEL: ${String(difficulty).toUpperCase()}
+${DIFFICULTY_INSTRUCTIONS[difficulty] || DIFFICULTY_INSTRUCTIONS.normal}
 
 REQUIREMENTS:
-- Each question must have exactly 4 options labeled A, B, C, D.
-- Each question is worth ${marksPerQuestion} mark(s).
-- Total marks for the exam: ${totalMarks}.
-- Provide the correct answer letter and a brief explanation for each question.
-- Questions must be derived from the provided material only.
-- Vary question types: some factual recall, some application, some analysis (based on difficulty).
+- MCQ questions: type "mcq", exactly 4 options labeled "A) ...", "B) ...", "C) ...", "D) ...", a "correctAnswer" letter (A/B/C/D), a brief "explanation", and marks = ${marksPerMcq}.
+- Written questions: type "short", NO options, marks = ${marksPerShort}. Provide 2-4 "keyPoints" (the ideal answer's key points) used later for grading. Do NOT include options for these.
+- Every question must be derived from the provided material only.
+- Number ids sequentially starting at 1. You may interleave MCQ and written questions.
 
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with valid JSON in this exact shape:
 {
   "examTitle": "Generated Exam on [topic]",
-  "totalMarks": ${totalMarks},
+  "totalMarks": ${computedTotal},
   "questions": [
-    {
-      "id": 1,
-      "type": "mcq",
-      "marks": ${marksPerQuestion},
-      "question": "Question text here?",
-      "options": ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
-      "correctAnswer": "A",
-      "explanation": "Brief explanation of why A is correct."
-    }
+    { "id": 1, "type": "mcq", "marks": ${marksPerMcq}, "question": "…?", "options": ["A) …","B) …","C) …","D) …"], "correctAnswer": "A", "explanation": "…" },
+    { "id": 2, "type": "short", "marks": ${marksPerShort}, "question": "Explain …", "keyPoints": ["point 1","point 2"] }
   ]
 }
 
@@ -835,18 +991,32 @@ ${materialText.substring(0, 12000)}`;
       return res.status(500).json({ success: false, error: 'AI did not return a response.' });
     }
 
-    const exam = JSON.parse(content);
-    totalTokensUsed += response.usage?.total_tokens || 0;
-    console.log(`✅ Generated exam: ${exam.examTitle} (${exam.questions?.length || 0} questions, ${totalMarks} marks, ${difficulty} difficulty)`);
+    const raw = JSON.parse(content);
+    const questions = normalizeExamQuestions(raw.questions);
+    if (questions.length === 0) {
+      return res.status(500).json({ success: false, error: 'AI did not return any usable questions. Please try again.' });
+    }
 
-    res.json({ success: true, exam });
+    const fullExam = {
+      examTitle: raw.examTitle || 'Generated Exam',
+      totalMarks: questions.reduce((s, q) => s + q.marks, 0),
+      questions,
+    };
+    const examId = storeExam(fullExam);
+
+    totalTokensUsed += response.usage?.total_tokens || 0;
+    const mcqN = questions.filter(q => q.type === 'mcq').length;
+    const shortN = questions.filter(q => q.type === 'short').length;
+    console.log(`✅ Generated exam: ${fullExam.examTitle} (${mcqN} MCQ + ${shortN} written, ${fullExam.totalMarks} marks, ${difficulty})`);
+
+    res.json({ success: true, exam: stripExamForClient(fullExam, examId) });
   } catch (err) {
     console.error('Generate exam error:', err.message);
     res.status(500).json({ success: false, error: 'Failed to generate exam. Please try again.' });
   }
 });
 
-// Parse an existing exam paper text into structured JSON
+// Parse an existing exam paper text into structured JSON (MCQ + written).
 app.post('/api/parse-paper', async (req, res) => {
   try {
     const { text } = req.body;
@@ -854,28 +1024,21 @@ app.post('/api/parse-paper', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Please provide exam paper text (at least 20 characters).' });
     }
 
-    const prompt = `You are an expert exam parser. The following text is an exam paper. Extract all questions, options, correct answers, and marks from it.
+    const prompt = `You are an expert exam parser. The following text is an exam paper. Extract every question.
 
 RULES:
-- Extract each question with its options (A, B, C, D).
-- If marks are specified per question (e.g., "[2 marks]"), use that value. Otherwise default to 1 mark per MCQ.
-- If the answer key is provided, extract correct answers. If not, set correctAnswer to "" (empty string).
-- Calculate the total marks from all questions.
+- A question with multiple choices → type "mcq" with options ["A) …","B) …","C) …","D) …"]. Include "correctAnswer" letter if an answer key is present, else "".
+- A question asking for a written/explanatory answer (no choices) → type "short" with NO options. Add 2-4 "keyPoints" capturing what a correct answer should mention (infer them if not stated).
+- If marks are specified per question (e.g. "[2 marks]"), use that value. Otherwise default to 1 for MCQ and 3 for written.
+- Number ids sequentially from 1. Calculate totalMarks from all questions.
 
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with valid JSON in this exact shape:
 {
   "examTitle": "Parsed Exam Paper",
   "totalMarks": <number>,
   "questions": [
-    {
-      "id": 1,
-      "type": "mcq",
-      "marks": 1,
-      "question": "Question text?",
-      "options": ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
-      "correctAnswer": "A",
-      "explanation": ""
-    }
+    { "id": 1, "type": "mcq", "marks": 1, "question": "…?", "options": ["A) …","B) …","C) …","D) …"], "correctAnswer": "A", "explanation": "" },
+    { "id": 2, "type": "short", "marks": 3, "question": "Explain …", "keyPoints": ["point 1","point 2"] }
   ]
 }
 
@@ -894,14 +1057,143 @@ ${text.substring(0, 12000)}`;
       return res.status(500).json({ success: false, error: 'AI did not return a response.' });
     }
 
-    const exam = JSON.parse(content);
-    totalTokensUsed += response.usage?.total_tokens || 0;
-    console.log(`✅ Parsed paper: ${exam.examTitle} (${exam.questions?.length || 0} questions extracted)`);
+    const raw = JSON.parse(content);
+    const questions = normalizeExamQuestions(raw.questions);
+    if (questions.length === 0) {
+      return res.status(500).json({ success: false, error: 'No questions could be extracted from this paper. Please check the document.' });
+    }
 
-    res.json({ success: true, exam });
+    const fullExam = {
+      examTitle: raw.examTitle || 'Parsed Exam Paper',
+      totalMarks: questions.reduce((s, q) => s + q.marks, 0),
+      questions,
+    };
+    const examId = storeExam(fullExam);
+
+    totalTokensUsed += response.usage?.total_tokens || 0;
+    console.log(`✅ Parsed paper: ${fullExam.examTitle} (${questions.length} questions extracted)`);
+
+    res.json({ success: true, exam: stripExamForClient(fullExam, examId) });
   } catch (err) {
     console.error('Parse paper error:', err.message);
     res.status(500).json({ success: false, error: 'Failed to parse paper. Please try again.' });
+  }
+});
+
+// ─── GRADE CUSTOM EXAM ────────────────────────────────────────────────────────
+// Grades MCQs by the stored answer key and grades ALL written answers together in
+// one cumulative AI call, which also yields cognitive features for the profile.
+app.post('/api/grade-exam', async (req, res) => {
+  try {
+    const { examId, exam: inlineExam, answers = {} } = req.body;
+
+    // Prefer the server-side stored exam (leak-free path); fall back to an inline
+    // exam for manually-authored papers the client created itself.
+    let fullExam = null;
+    if (examId && examStore.has(examId)) {
+      fullExam = examStore.get(examId).exam;
+    } else if (inlineExam && Array.isArray(inlineExam.questions)) {
+      fullExam = { ...inlineExam, questions: normalizeExamQuestions(inlineExam.questions) };
+    }
+    if (!fullExam) {
+      return res.status(404).json({ success: false, error: 'Exam session not found or expired. Please regenerate the exam.' });
+    }
+
+    const questions = fullExam.questions;
+    const graded = [];
+    let mcqMarks = 0;
+
+    // 1) Auto-grade MCQs against the key.
+    for (const q of questions) {
+      if (q.type !== 'mcq') continue;
+      const sel = (answers[q.id] || '').toString().trim().charAt(0).toUpperCase();
+      const correct = !!sel && sel === q.correctAnswer;
+      const awarded = correct ? q.marks : 0;
+      mcqMarks += awarded;
+      graded.push({ id: q.id, awardedMarks: awarded, correct });
+    }
+
+    // 2) Grade written answers cumulatively via AI (also produces cognitive features).
+    const shortQs = questions.filter(q => q.type === 'short');
+    let shortMarks = 0;
+    let cognitive = null;
+    let usage = { tokens: 0 };
+
+    if (shortQs.length > 0) {
+      const formatted = shortQs.map(q => {
+        let a = answers[q.id];
+        if (Array.isArray(a)) a = a.join(' ');
+        a = (a || '').toString().trim() || '[NO ANSWER PROVIDED]';
+        const kp = (q.keyPoints || []).length ? `\nExpected key points: ${q.keyPoints.join('; ')}` : '';
+        return `Q${q.id} (worth ${q.marks} marks): ${q.question}${kp}\nStudent answer: ${a}`;
+      }).join('\n\n');
+
+      const gradePrompt = `You are a fair, rigorous exam grader. Grade each written answer below on a 0..maxMarks scale for that question, based on correctness, completeness and relevance to the expected key points. Reward partial credit. Empty/gibberish answers get 0.
+
+Also assess the student's overall cognitive profile FROM THEIR WRITTEN ANSWERS on a 0.0–1.0 scale (do not default to 0.5 — discriminate):
+- reflection_depth: depth of reasoning, use of causal connectives ("because", "therefore").
+- self_awareness: acknowledging limits, assumptions, or trade-offs.
+- learning_orientation: curiosity, information-seeking, growth mindset.
+- creativity_score: originality and resourcefulness vs generic answers.
+
+WRITTEN QUESTIONS & ANSWERS:
+${formatted}
+
+Respond ONLY with valid JSON:
+{
+  "grades": [ { "id": <questionId>, "awardedMarks": <number>, "feedback": "one concise sentence" } ],
+  "cognitive": { "reflection_depth": 0.0, "self_awareness": 0.0, "learning_orientation": 0.0, "creativity_score": 0.0, "insights": ["obs 1","obs 2"] }
+}`;
+
+      const completion = await openai.chat.completions.create({
+        model: MODEL,
+        messages: [{ role: 'user', content: gradePrompt }],
+        temperature: 0.2,
+        max_tokens: 800,
+        response_format: { type: 'json_object' },
+      });
+
+      const parsed = JSON.parse(completion.choices[0].message.content);
+      totalTokensUsed += completion.usage?.total_tokens || 0;
+      usage = { tokens: completion.usage?.total_tokens || 0 };
+
+      // Match model grades to questions robustly: prefer id match (string-coerced,
+      // since the model may return ids as numbers or strings), then fall back to
+      // positional order so a valid answer never silently scores 0 on a mismatch.
+      const rawGrades = Array.isArray(parsed.grades) ? parsed.grades : [];
+      const gradeById = {};
+      rawGrades.forEach(g => { if (g && g.id !== undefined && g.id !== null) gradeById[String(g.id)] = g; });
+
+      shortQs.forEach((q, idx) => {
+        const g = gradeById[String(q.id)] || rawGrades[idx] || {};
+        const awarded = Math.max(0, Math.min(q.marks, Number(g.awardedMarks) || 0));
+        shortMarks += awarded;
+        graded.push({ id: q.id, awardedMarks: Math.round(awarded * 100) / 100, feedback: g.feedback || '' });
+      });
+
+      cognitive = parsed.cognitive || null;
+    }
+
+    const obtainedMarks = Math.round((mcqMarks + shortMarks) * 100) / 100;
+
+    console.log(`🧮 Graded exam "${fullExam.examTitle}": ${obtainedMarks}/${fullExam.totalMarks} (MCQ ${mcqMarks} + written ${shortMarks})`);
+
+    res.json({
+      success: true,
+      result: {
+        questions,        // full questions WITH answer key, for post-submit review
+        graded,
+        obtainedMarks,
+        totalMarks: fullExam.totalMarks,
+        mcqMarks,
+        shortMarks,
+        cognitive,
+      },
+      usage,
+    });
+  } catch (err) {
+    console.error('Grade exam error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to grade exam. Please try again.' });
   }
 });
 
@@ -1485,6 +1777,14 @@ app.get('/api/health', (req, res) => {
       'age-18-25',
     ],
   });
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Uncaught Exception trapped:', err.message || err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ Unhandled Rejection trapped:', reason?.message || reason);
 });
 
 app.listen(PORT, () => {

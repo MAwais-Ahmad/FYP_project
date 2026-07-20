@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { CustomExamQuestion, GeneratedExam } from '../../types/quiz.types';
+import { CustomExamQuestion, GeneratedExam, GradedQuestion, CognitiveFeatures } from '../../types/quiz.types';
+import { gradeExam } from '../../services/api';
 
 interface CustomQuizScreenProps {
     exam: GeneratedExam;
@@ -14,11 +15,15 @@ export interface CustomExamResults {
     percentage: number;
     totalTime: number;
     avgTimePerQuestion: number;
-    questions: CustomExamQuestion[];
+    questions: CustomExamQuestion[];   // WITH answer key (returned by server after grading)
+    graded: GradedQuestion[];
     selectedAnswers: Record<number, string>;
     questionTimes: Record<number, number>;
     revisionCounts: Record<number, number>;
     totalRevisions: number;
+    cognitive?: CognitiveFeatures | null;
+    mcqMarks: number;
+    shortMarks: number;
 }
 
 export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenProps) {
@@ -29,11 +34,13 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
     const [questionStartTime, setQuestionStartTime] = useState(Date.now());
     const [quizStartTime] = useState(Date.now());
     const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
+    const [isGrading, setIsGrading] = useState(false);
+    const [gradeError, setGradeError] = useState('');
 
     const totalQuestions = exam.questions.length;
     const currentQuestion = exam.questions[currentIndex];
     const progress = ((currentIndex + 1) / totalQuestions) * 100;
-    const answeredCount = Object.keys(selectedAnswers).length;
+    const answeredCount = Object.values(selectedAnswers).filter(v => v && v.toString().trim().length > 0).length;
 
     // Record time when moving between questions
     const recordCurrentQuestionTime = useCallback(() => {
@@ -63,6 +70,10 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
         setSelectedAnswers(prev => ({ ...prev, [currentQuestion.id]: letter }));
     };
 
+    const handleWrittenAnswer = (text: string) => {
+        setSelectedAnswers(prev => ({ ...prev, [currentQuestion.id]: text }));
+    };
+
     const goToNext = () => {
         recordCurrentQuestionTime();
         if (currentIndex < totalQuestions - 1) {
@@ -82,37 +93,53 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
         setCurrentIndex(index);
     };
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         recordCurrentQuestionTime();
         const totalTime = (Date.now() - quizStartTime) / 1000;
+        setIsGrading(true);
+        setGradeError('');
 
-        // Calculate score
-        let obtainedMarks = 0;
-        for (const q of exam.questions) {
-            const selected = selectedAnswers[q.id];
-            if (selected && selected === q.correctAnswer) {
-                obtainedMarks += q.marks;
-            }
+        // Grade on the server: MCQs by key + written answers cumulatively via AI.
+        // examId → leak-free stored exam; otherwise send the (manual) exam inline.
+        const resp = await gradeExam({
+            examId: exam.examId,
+            exam: exam.examId ? undefined : exam,
+            answers: selectedAnswers,
+        });
+
+        if (!resp.success || !resp.result) {
+            setIsGrading(false);
+            setGradeError(resp.error || 'Failed to grade exam. Please try again.');
+            return;
         }
 
+        const r = resp.result;
         const totalRevisions = Object.values(revisionCounts).reduce((s, v) => s + v, 0);
 
         const results: CustomExamResults = {
             examTitle: exam.examTitle,
-            totalMarks: exam.totalMarks,
-            obtainedMarks,
-            percentage: Math.round((obtainedMarks / exam.totalMarks) * 100),
+            totalMarks: r.totalMarks,
+            obtainedMarks: r.obtainedMarks,
+            percentage: r.totalMarks > 0 ? Math.round((r.obtainedMarks / r.totalMarks) * 100) : 0,
             totalTime,
             avgTimePerQuestion: totalTime / totalQuestions,
-            questions: exam.questions,
+            questions: r.questions,
+            graded: r.graded,
             selectedAnswers,
             questionTimes,
             revisionCounts,
             totalRevisions,
+            cognitive: r.cognitive,
+            mcqMarks: r.mcqMarks,
+            shortMarks: r.shortMarks,
         };
 
+        setIsGrading(false);
         onComplete(results);
     };
+
+    const isWritten = currentQuestion.type === 'short';
+    const currentAnswer = selectedAnswers[currentQuestion.id] || '';
 
     return (
         <section className="min-h-screen flex flex-col relative overflow-hidden">
@@ -132,6 +159,9 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
                         <span className="text-xs bg-primary-500/20 text-primary-300 px-2 py-0.5 rounded-full">
                             {currentQuestion.marks} mark{currentQuestion.marks > 1 ? 's' : ''}
                         </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${isWritten ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-sky-500/20 text-sky-300'}`}>
+                            {isWritten ? 'Written' : 'MCQ'}
+                        </span>
                     </div>
                     <div className="flex items-center gap-3">
                         <span className="text-xs text-white/40">
@@ -150,21 +180,25 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
             {/* Question Navigation Grid */}
             <div className="max-w-4xl mx-auto w-full px-4 pt-4">
                 <div className="flex flex-wrap gap-1.5 justify-center">
-                    {exam.questions.map((q, i) => (
-                        <button
-                            key={q.id}
-                            onClick={() => goToQuestion(i)}
-                            className={`w-8 h-8 rounded-lg text-xs font-semibold transition-all ${
-                                i === currentIndex
-                                    ? 'bg-primary-500 text-white shadow-lg scale-110'
-                                    : selectedAnswers[q.id]
-                                    ? 'bg-green-500/30 text-green-300 border border-green-500/30'
-                                    : 'bg-white/5 text-white/40 hover:bg-white/10 border border-white/5'
-                            }`}
-                        >
-                            {i + 1}
-                        </button>
-                    ))}
+                    {exam.questions.map((q, i) => {
+                        const ans = selectedAnswers[q.id];
+                        const isAnswered = ans && ans.toString().trim().length > 0;
+                        return (
+                            <button
+                                key={q.id}
+                                onClick={() => goToQuestion(i)}
+                                className={`w-8 h-8 rounded-lg text-xs font-semibold transition-all ${
+                                    i === currentIndex
+                                        ? 'bg-primary-500 text-white shadow-lg scale-110'
+                                        : isAnswered
+                                        ? 'bg-green-500/30 text-green-300 border border-green-500/30'
+                                        : 'bg-white/5 text-white/40 hover:bg-white/10 border border-white/5'
+                                }`}
+                            >
+                                {i + 1}
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -187,39 +221,60 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
                             </h2>
                         </div>
 
-                        {/* Options */}
-                        <div className="space-y-3">
-                            {currentQuestion.options.map((option, oi) => {
-                                const letter = option.charAt(0);
-                                const isSelected = selectedAnswers[currentQuestion.id] === letter;
+                        {/* Answer input: MCQ options OR written textarea */}
+                        {isWritten ? (
+                            <div className="space-y-2">
+                                <textarea
+                                    className="text-input min-h-[160px] text-sm resize-y"
+                                    value={currentAnswer}
+                                    onChange={(e) => handleWrittenAnswer(e.target.value)}
+                                    placeholder="Type your answer here..."
+                                    rows={7}
+                                />
+                                <p className="text-right text-xs text-white/30">
+                                    {currentAnswer.trim() ? currentAnswer.trim().split(/\s+/).length : 0} words
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {currentQuestion.options.map((option, oi) => {
+                                    const letter = option.charAt(0);
+                                    const isSelected = selectedAnswers[currentQuestion.id] === letter;
 
-                                return (
-                                    <button
-                                        key={oi}
-                                        onClick={() => handleSelectAnswer(option)}
-                                        className={`w-full text-left p-4 rounded-xl border transition-all duration-200 ${
-                                            isSelected
-                                                ? 'border-primary-500/50 bg-primary-500/20 text-white shadow-lg shadow-primary-500/10'
-                                                : 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:border-white/20'
-                                        }`}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <div
-                                                className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 transition-all ${
-                                                    isSelected
-                                                        ? 'bg-primary-500 text-white'
-                                                        : 'bg-white/10 text-white/50'
-                                                }`}
-                                            >
-                                                {letter}
+                                    return (
+                                        <button
+                                            key={oi}
+                                            onClick={() => handleSelectAnswer(option)}
+                                            className={`w-full text-left p-4 rounded-xl border transition-all duration-200 ${
+                                                isSelected
+                                                    ? 'border-primary-500/50 bg-primary-500/20 text-white shadow-lg shadow-primary-500/10'
+                                                    : 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:border-white/20'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div
+                                                    className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 transition-all ${
+                                                        isSelected
+                                                            ? 'bg-primary-500 text-white'
+                                                            : 'bg-white/10 text-white/50'
+                                                    }`}
+                                                >
+                                                    {letter}
+                                                </div>
+                                                <span className="text-sm">{option.substring(2).trim()}</span>
                                             </div>
-                                            <span className="text-sm">{option.substring(2).trim()}</span>
-                                        </div>
-                                    </button>
-                                );
-                            })}
-                        </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
+
+                    {gradeError && (
+                        <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-center">
+                            ⚠️ {gradeError}
+                        </div>
+                    )}
 
                     {/* Navigation Buttons */}
                     <div className="flex items-center justify-between">
@@ -254,33 +309,50 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
             {showConfirmSubmit && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
                     <div className="glass-card max-w-md w-full p-8 text-center space-y-5 border border-white/10 shadow-2xl">
-                        <div className="text-5xl">📋</div>
-                        <h2 className="text-xl font-bold">Submit Exam?</h2>
-                        <div className="text-sm text-white/60 space-y-1">
-                            <p>
-                                You answered <span className="text-white font-semibold">{answeredCount}</span> out of{' '}
-                                <span className="text-white font-semibold">{totalQuestions}</span> questions.
-                            </p>
-                            {answeredCount < totalQuestions && (
-                                <p className="text-yellow-400">
-                                    ⚠️ {totalQuestions - answeredCount} question{totalQuestions - answeredCount > 1 ? 's are' : ' is'} unanswered.
+                        <div className="text-5xl">{isGrading ? '🤖' : '📋'}</div>
+                        {isGrading ? (
+                            <>
+                                <h2 className="text-xl font-bold">Grading your exam...</h2>
+                                <p className="text-sm text-white/60">
+                                    Auto-marking MCQs and evaluating your written answers. This takes a few seconds.
                                 </p>
-                            )}
-                        </div>
-                        <div className="flex gap-3 justify-center">
-                            <button
-                                onClick={() => setShowConfirmSubmit(false)}
-                                className="btn-secondary !py-2.5 !px-5"
-                            >
-                                ← Review
-                            </button>
-                            <button
-                                onClick={handleSubmit}
-                                className="btn-primary !py-2.5 !px-6"
-                            >
-                                ✅ Confirm Submit
-                            </button>
-                        </div>
+                                <div className="flex items-center justify-center gap-2 text-primary-300">
+                                    <span className="animate-spin text-2xl">⏳</span>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <h2 className="text-xl font-bold">Submit Exam?</h2>
+                                <div className="text-sm text-white/60 space-y-1">
+                                    <p>
+                                        You answered <span className="text-white font-semibold">{answeredCount}</span> out of{' '}
+                                        <span className="text-white font-semibold">{totalQuestions}</span> questions.
+                                    </p>
+                                    {answeredCount < totalQuestions && (
+                                        <p className="text-yellow-400">
+                                            ⚠️ {totalQuestions - answeredCount} question{totalQuestions - answeredCount > 1 ? 's are' : ' is'} unanswered.
+                                        </p>
+                                    )}
+                                </div>
+                                {gradeError && (
+                                    <p className="text-red-400 text-sm">⚠️ {gradeError}</p>
+                                )}
+                                <div className="flex gap-3 justify-center">
+                                    <button
+                                        onClick={() => setShowConfirmSubmit(false)}
+                                        className="btn-secondary !py-2.5 !px-5"
+                                    >
+                                        ← Review
+                                    </button>
+                                    <button
+                                        onClick={handleSubmit}
+                                        className="btn-primary !py-2.5 !px-6"
+                                    >
+                                        ✅ Confirm Submit
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

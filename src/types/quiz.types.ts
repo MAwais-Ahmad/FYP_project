@@ -165,25 +165,53 @@ export type AssessmentMode = 'ai-scenario' | 'custom-paper' | 'ai-material';
 
 export type ExamDifficulty = 'easy' | 'normal' | 'hard';
 
+// 'mcq' = multiple choice (auto-graded by key); 'short' = written/short-answer
+// (graded cumulatively by AI, and used for the cognitive text evaluation).
+export type CustomQuestionType = 'mcq' | 'short';
+
 export interface CustomExamQuestion {
     id: number;
-    type: 'mcq';
+    type: CustomQuestionType;
     marks: number;
     question: string;
-    options: string[];
-    correctAnswer: string;
+    options: string[];        // empty array for 'short' questions
+    // Answer-key fields — present only in the server-side copy and in the graded
+    // result returned AFTER submission. Stripped from the exam sent to the client
+    // before the exam starts, so answers can never leak.
+    correctAnswer?: string;   // MCQ letter (A–D)
     explanation?: string;
+    keyPoints?: string[];     // model answer bullet points for grading 'short'
 }
 
 export interface ExamConfig {
     materialText: string;
-    questionCount: number;
+    mcqCount: number;
+    shortCount: number;
     totalMarks: number;
     difficulty: ExamDifficulty;
 }
 
 export interface GeneratedExam {
+    examId?: string;          // server-side handle used for leak-free grading
     examTitle: string;
     totalMarks: number;
     questions: CustomExamQuestion[];
+}
+
+// Per-question grading detail returned by the server after submission.
+export interface GradedQuestion {
+    id: number;
+    awardedMarks: number;
+    correct?: boolean;        // MCQ only
+    feedback?: string;        // short-answer AI feedback
+}
+
+export interface ExamGradingResult {
+    questions: CustomExamQuestion[];   // full questions WITH answer key (post-submit)
+    graded: GradedQuestion[];
+    obtainedMarks: number;
+    totalMarks: number;
+    mcqMarks: number;
+    shortMarks: number;
+    cognitive?: CognitiveFeatures;     // from cumulative AI text evaluation
 }
