@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Teacher Assistant (AITA) - Official UMT SST FYP Flex Standee Banner</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap');
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #e2e8f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            color: #1f2937;
+        }
+
+        /* ========== BANNER CONTAINER ========== */
+        /* 2ft x 5ft standee (24in x 60in → 800px x 2000px) */
+        .banner-container {
+            width: 800px;
+            min-height: 2000px;
+            height: auto;
+            background: #ffffff;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.5);
+            position: relative;
+            overflow: hidden;
+            border: 4px solid #500b1a;
+        }
+
+        /* ========== HEADER (STARTER) — Full Maroon ========== */
+        .header {
+            background: #500b1a;
+            text-align: center;
+            color: #ffffff;
+            padding: 26px 30px 22px;
+        }
+
+        .sst-logo-header {
+            margin-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+            padding-bottom: 10px;
+        }
+
+        .umt-sst-brand {
+            font-size: 54px;
+            font-weight: 900;
+            letter-spacing: 3px;
+            line-height: 1;
+            color: #ffffff;
+        }
+
+        .umt-sst-brand span {
+            color: #ffffff;
+            opacity: 0.5;
+            margin: 0 6px;
+        }
+
+        .sst-sub-heading {
+            font-size: 15.5px;
+            font-weight: 700;
+            letter-spacing: 1.2px;
+            color: #ffffff;
+            margin-top: 4px;
+            text-transform: uppercase;
+            opacity: 0.95;
+        }
+
+        .sst-tagline {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: #ffffff;
+            opacity: 0.8;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+
+        .fyp-flat-label {
+            font-size: 14px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: #ffffff;
+            opacity: 0.9;
+            margin-top: 10px;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .project-main-title {
+            font-size: 54px;
+            font-weight: 900;
+            color: #ffffff;
+            margin-top: 2px;
+            margin-bottom: 2px;
+            line-height: 1.05;
+            letter-spacing: -0.5px;
+            text-shadow: 0 3px 8px rgba(0,0,0,0.3);
+        }
+
+        .tagline-text {
+            font-size: 18px;
+            font-weight: 700;
+            color: #ffffff;
+            opacity: 0.95;
+            margin-bottom: 14px;
+            letter-spacing: normal;
+            word-spacing: normal;
+        }
+
+        .pills-group {
+            margin-bottom: 2px;
+        }
+
+        .pill-label {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.18);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            color: #ffffff;
+            font-size: 12.5px;
+            font-weight: 800;
+            padding: 4px 22px;
+            border-radius: 20px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .names-row {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 4px;
+        }
+
+        .name-pill {
+            background: rgba(255, 255, 255, 0.18);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            color: #ffffff;
+            padding: 7px 20px;
+            border-radius: 20px;
+            font-size: 14.5px;
+            font-weight: 700;
+        }
+
+        /* ========== BODY — White Background ========== */
+        .sections-body {
+            flex: 1;
+            background: #ffffff;
+            padding: 24px 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 22px;
+            justify-content: space-between;
+        }
+
+        /* ========== SECTION CARDS — Maroon Border Only ========== */
+        .card {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 22px 24px;
+            border: 2px solid #500b1a;
+            position: relative;
+        }
+
+        /* Specifically enlarged CORE FEATURES card */
+        .card-core-features {
+            padding: 28px 26px;
+        }
+
+        .card-header-badge {
+            background: #500b1a;
+            color: #ffffff;
+            display: inline-block;
+            padding: 7px 24px;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+        }
+
+        .card-text {
+            font-size: 14px;
+            line-height: 1.65;
+            color: #374151;
+            text-align: left;
+            word-spacing: normal;
+        }
+
+        .bullet-list {
+            list-style: none;
+            font-size: 13.5px;
+            color: #1f2937;
+            line-height: 1.65;
+        }
+
+        .bullet-list li {
+            margin-bottom: 7px;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .bullet-list li::before {
+            content: "•";
+            color: #500b1a;
+            font-weight: 900;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        /* Tech Badges */
+        .tech-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            padding: 6px 0;
+        }
+
+        .tech-pill {
+            background: #fdf2f4;
+            border: 1px solid #e0c4ca;
+            color: #500b1a;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Core Features Inner 3 Boxes — White Background with Maroon Border */
+        .service-box {
+            background: #ffffff;
+            border: 2px solid #500b1a;
+            border-radius: 14px;
+            padding: 20px 18px;
+            text-align: left;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            box-shadow: 0 4px 10px rgba(80, 11, 26, 0.05);
+        }
+
+        .service-box-title {
+            font-size: 14.5px;
+            font-weight: 800;
+            color: #500b1a;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            line-height: 1.35;
+        }
+
+        .service-box-desc {
+            font-size: 13px;
+            color: #334155;
+            line-height: 1.6;
+        }
+
+        /* Methodology Steps */
+        .flow-step {
+            background: #fdf2f4;
+            color: #500b1a;
+            border: 1.5px solid #500b1a;
+            border-radius: 20px;
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 800;
+            text-align: center;
+            margin-bottom: 3px;
+        }
+
+        .flow-arrow {
+            text-align: center;
+            color: #500b1a;
+            font-weight: 900;
+            font-size: 16px;
+            margin: -1px 0;
+        }
+
+        /* ========== SUPERVISOR SECTION — Before Footer ========== */
+        .supervisor-section {
+            text-align: center;
+            padding: 20px 28px 24px;
+            background: #ffffff;
+        }
+
+        .supervisor-pill {
+            display: inline-block;
+            font-size: 17px;
+            font-weight: 800;
+            color: #500b1a;
+            background: #fdf2f4;
+            border: 2px solid #500b1a;
+            padding: 12px 48px;
+            border-radius: 30px;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 12px rgba(80, 11, 26, 0.08);
+        }
+
+        /* ========== FOOTER (ENDER) — Full Maroon ========== */
+        .footer {
+            background: #500b1a;
+            text-align: center;
+            color: #ffffff;
+            padding: 20px 30px;
+        }
+
+        .footer-dept {
+            font-size: 16px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: #ffffff;
+        }
+
+        .footer-uni {
+            font-size: 13.5px;
+            color: #ffffff;
+            opacity: 0.9;
+            margin-top: 4px;
+            font-weight: 600;
+        }
+
+        @media print {
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
+            body {
+                padding: 0;
+                background: white;
+            }
+
+            .banner-container {
+                box-shadow: none;
+                width: 24in;
+                height: 60in;
+                border: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="banner-container">
+
+        <!-- ==================== HEADER (STARTER) — Full Maroon ==================== -->
+        <div class="header">
+            <div class="sst-logo-header">
+                <div class="umt-sst-brand">UMT<span>|</span>SST</div>
+                <div class="sst-sub-heading">School of Systems and Technology</div>
+                <div class="sst-tagline">Leading Pakistan's Digital Revolution</div>
+            </div>
+
+            <div class="fyp-flat-label">FINAL YEAR PROJECT</div>
+            <h1 class="project-main-title">AI Teacher Assistant</h1>
+            <div class="tagline-text">An AI-Driven System for Cognitive Learning Style Detection</div>
+
+            <div class="pills-group">
+                <div class="pill-label">Team Members</div>
+                <div class="names-row">
+                    <span class="name-pill">M. Yasir Shehzaad</span>
+                    <span class="name-pill">Moeez Atif</span>
+                    <span class="name-pill">Zainab Ahmad</span>
+                    <span class="name-pill">Awais Ahmad</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== BODY — White Background, Maroon Borders ==================== -->
+        <div class="sections-body">
+
+            <!-- ABSTRACT -->
+            <div class="card">
+                <div class="card-header-badge">ABSTRACT</div>
+                <p class="card-text">
+                    <strong>AI Teacher Assistant (AITA)</strong> is <strong>primarily</strong> an intelligent diagnostic
+                    system engineered for <strong>Cognitive Learning Style Categorization</strong>. By capturing
+                    real-time behavioral analytics during student test interactions, AITA automatically classifies
+                    learners into 8 operational cognitive profiles. <strong>Secondarily</strong>, it functions as a
+                    <strong>Multimodal Assessment Platform</strong>—offering AI Adaptive Scenarios, Custom PDF/PPTX
+                    Paper OCR, and AI Material Exams—to collect interaction data, empower teachers with diagnostic class
+                    intelligence, and deliver personalized AI coaching.
+                </p>
+            </div>
+
+            <!-- PROBLEM STATEMENT & OBJECTIVES -->
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header-badge">PROBLEM STATEMENT</div>
+                    <p class="card-text">
+                        Traditional assessment software treats testing as a black box—outputting shallow right-or-wrong
+                        (pass/fail) scores while ignoring <em>how students reach such results</em>.
+                        <strong>AITA</strong> bridges this critical gap by capturing real-time behavioral analytics
+                        (pacing, answer revisions, item variance, reflection depth) to diagnose operational
+                        <strong>Cognitive Learning Styles</strong>, providing teachers with diagnostic intelligence
+                        rather than just a numeric grade.
+                    </p>
+                </div>
+
+                <div class="card">
+                    <div class="card-header-badge">OBJECTIVES</div>
+                    <ul class="bullet-list">
+                        <li><strong>Process-Based Diagnosis:</strong> Shift evaluation from static marks to real-time
+                            analytics.</li>
+                        <li><strong>Automated Categorization:</strong> Classify 8 learner profiles with confidence
+                            scoring.</li>
+                        <li><strong>Multimodal Evaluation:</strong> Support AI scenarios, PDF/PPTX OCR, & Bloom's exams.
+                        </li>
+                        <li><strong>Class Intelligence:</strong> Empower teachers with cognitive analytics & AI lookup.
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- TECHNOLOGY USED -->
+            <div class="card" style="text-align: center;">
+                <div class="card-header-badge">TECHNOLOGY USED</div>
+                <div class="tech-container">
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="2.2" fill="#61DAFB"/><ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="#61DAFB" stroke-width="1.5"/><ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="#61DAFB" stroke-width="1.5" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.8" stroke="#61DAFB" stroke-width="1.5" transform="rotate(120 12 12)"/></svg>React 18</span>
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24"><rect width="24" height="24" rx="4" fill="#3178C6"/><path d="M11.5 11.5H9V19H7.2V11.5H4.7V9.8H11.5V11.5ZM20 16.5C20 17.7 19.4 18.6 18.2 19.1C17 19.6 15.4 19.9 13.5 19.9C11.8 19.9 10.3 19.6 8.9 19.2V16.9C10.2 17.5 11.7 17.9 13.3 17.9C15.4 17.9 16.5 17.4 16.5 16.4C16.5 16.1 16.3 15.8 15.9 15.5C15.5 15.2 14.7 14.9 13.5 14.5C12 14.1 10.9 13.5 10.3 12.9C9.7 12.3 9.4 11.5 9.4 10.4C9.4 9.2 10 8.3 11.1 7.7C12.2 7.1 13.8 6.8 15.7 6.8C17.2 6.8 18.6 7 19.8 7.4V9.7C18.6 9.3 17.3 9 16 9C14 9 13 9.4 13 10.3C13 10.6 13.2 10.9 13.6 11.1C14 11.3 14.8 11.6 16 12C17.6 12.5 18.7 13 19.3 13.7C19.8 14.4 20.1 15.3 20 16.5Z" fill="#ffffff"/></svg>TypeScript</span>
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="#06B6D4"><path d="M12 6c-3.7 0-6 1.8-7 5.5 1.5-1.8 3.2-2.5 5.2-2 1.1.3 1.9 1.1 2.8 2 1.4 1.5 3.1 3.3 7 3.3 3.7 0 6-1.8 7-5.5-1.5 1.8-3.2 2.5-5.2 2-1.1-.3-1.9-1.1-2.8-2C17.7 7.8 16 6 12 6zm-7 7.5c-3.7 0-6 1.8-7 5.5 1.5-1.8 3.2-2.5 5.2-2 1.1.3 1.9 1.1 2.8 2 1.4 1.5 3.1 3.3 7 3.3 3.7 0 6-1.8 7-5.5-1.5 1.8-3.2 2.5-5.2 2-1.1-.3-1.9-1.1-2.8-2-1.4-1.5-3.1-3.3-7-3.3z"/></svg>TailwindCSS</span>
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="#339933"><path d="M12 2L2 7.5v9L12 22l10-5.5v-9L12 2zm7.5 13.4L12 19.6l-7.5-4.2V8.6L12 4.4l7.5 4.2v6.8z"/><path d="M12 7L7 9.8v4.4l5 2.8 5-2.8V9.8L12 7z"/></svg>Node.js</span>
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="#500b1a"><path d="M13 2L3 14h7v8l10-12h-7z"/></svg>Express</span>
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2D3748" stroke-width="2" stroke-linejoin="round"><polygon points="12 2 2 19 22 19"/></svg>Prisma ORM</span>
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="#336791"><path d="M12 3C7.58 3 4 4.79 4 7v10c0 2.21 3.58 4 8 4s8-1.79 8-4V7c0-2.21-3.58-4-8-4zm0 2c3.87 0 6 1.3 6 2s-2.13 2-6 2-6-1.3-6-2 2.13-2 6-2zm6 7c0 .7-2.13 2-6 2s-6-1.3-6-2V9.72c1.47.78 3.6 1.28 6 1.28s4.53-.5 6-1.28V12zm0 5c0 .7-2.13 2-6 2s-6-1.3-6-2v-2.28c1.47.78 3.6 1.28 6 1.28s4.53-.5 6-1.28V17z"/></svg>PostgreSQL</span>
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2L4 12h4v8h8v-8h4L12 2z"/></svg>Random Forest (ML)</span>
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="#10a37f"><path d="M22.28 9.82a5.98 5.98 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.51-2.9 6.07 6.07 0 0 0-10.27 2.17 5.98 5.98 0 0 0-4 2.9 6.05 6.05 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.05 6.05 0 0 0 6.52 2.9 5.98 5.98 0 0 0 4.5 2.17 6.06 6.06 0 0 0 5.76-4.18 5.98 5.98 0 0 0 4-2.9 6.05 6.05 0 0 0-.73-7.6zm-9.02 12.61a4.48 4.48 0 0 1-2.88-1.04l.14-.08 4.78-2.76a.79.79 0 0 0 .39-.68v-6.74l2.02 1.17a.07.07 0 0 1 .04.05v5.58a4.5 4.5 0 0 1-4.49 4.5zM8.3 12.86l-2.02-1.16a.08.08 0 0 1-.04-.05V6.06a4.5 4.5 0 0 1 7.37-3.45l-.14.08-4.78 2.76a.79.79 0 0 0-.39.68v6.73zm1.15-2.01 3.54-2.04 3.54 2.04v4.09l-3.54 2.04-3.54-2.04z"/></svg>OpenAI GPT-4o</span>
+                    <span class="tech-pill"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 15h3M1 9h3M1 15h3"/></svg>Llama 3.3 70B</span>
+                </div>
+            </div>
+
+            <!-- CORE FEATURES — Enlarged Box & Inner 3 Feature Boxes -->
+            <div class="card card-core-features">
+                <div style="text-align: center;">
+                    <div class="card-header-badge">CORE FEATURES</div>
+                </div>
+                <div class="grid-3" style="margin-top: 10px;">
+                    <div class="service-box">
+                        <div class="service-box-title" style="display: flex; align-items: center; gap: 6px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#500b1a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                            <span>1. REAL-TIME TEST TELEMETRY</span>
+                        </div>
+                        <div class="service-box-desc">
+                            Captures multi-dimensional student interaction telemetry during testing—including response pacing, answer revisions under time pressure, language depth, and metacognitive reflection.
+                        </div>
+                    </div>
+                    <div class="service-box">
+                        <div class="service-box-title" style="display: flex; align-items: center; gap: 6px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#500b1a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+                            <span>2. AUTOMATED ML PROFILING</span>
+                        </div>
+                        <div class="service-box-desc">
+                            Feeds interaction telemetry into a trained Random Forest classifier with confidence scoring to automatically derive and map patterns into 8 operational cognitive learning profiles.
+                        </div>
+                    </div>
+                    <div class="service-box">
+                        <div class="service-box-title" style="display: flex; align-items: center; gap: 6px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#500b1a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                            <span>3. MULTIMODAL ASSESSMENTS</span>
+                        </div>
+                        <div class="service-box-desc">
+                            Goes beyond static question banks by offering dynamic AI adaptive scenarios and custom PDF/PPTX paper OCR to evaluate real-world reasoning across Bloom's Taxonomy.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- METHODOLOGY & ACKNOWLEDGEMENTS -->
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header-badge">METHODOLOGY</div>
+                    <div style="padding-top: 4px;">
+                        <div class="flow-step">User Auth & Session Join</div>
+                        <div class="flow-arrow">↓</div>
+                        <div class="flow-step">Assessment Mode Selection</div>
+                        <div class="flow-arrow">↓</div>
+                        <div class="flow-step">Real-Time Interaction Metrics</div>
+                        <div class="flow-arrow">↓</div>
+                        <div class="flow-step">Cognitive Profiling Engine</div>
+                        <div class="flow-arrow">↓</div>
+                        <div class="flow-step">AI Advisor & Class Intelligence</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header-badge">ACKNOWLEDGEMENTS</div>
+                    <p class="card-text" style="font-size: 16px; line-height: 1.65;">
+                        We express our sincere gratitude to our supervisor <strong>Miss Sheeza Zaheer</strong> and
+                        co-supervisor Mr. Awais for their continuous guidance, technical encouragement,
+                        and feedback throughout the development of <strong>AI Teacher Assistant (AITA)</strong>.
+                    </p>
+                    <p class="card-text" style="font-size: 14.5px; margin-top: 14px; color: #4b5563; line-height: 1.6;">
+                        Special thanks to the faculty at the <strong>Department of Computer Science, School of Systems
+                            and Technology (SST), UMT Lahore</strong>.
+                    </p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ==================== SUPERVISOR — Before Footer ==================== -->
+        <div class="supervisor-section">
+            <div class="supervisor-pill">Supervisor: Miss Sheeza Zaheer</div>
+        </div>
+
+        <!-- ==================== FOOTER (ENDER) — Full Maroon ==================== -->
+        <div class="footer">
+            <div class="footer-dept">Department of Computer Science</div>
+            <div class="footer-uni">School of Systems and Technology • University of Management and Technology, Lahore
+            </div>
+        </div>
+
+    </div>
+
+</body>
+
+</html>

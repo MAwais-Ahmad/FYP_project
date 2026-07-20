@@ -145,33 +145,6 @@ export function useQuizState() {
                     ? evaluationData.evaluation.cognitive_features
                     : heuristicCognitiveFeatures(answers, questions, overallMetrics);
 
-                // Extract VARK score from evaluation
-                const varkScores = evaluationData.success && evaluationData.evaluation.vark
-                    ? evaluationData.evaluation.vark
-                    : (() => {
-                        let varkSummary = { V: 0, A: 0, R: 0, K: 0 };
-                        let varkCount = 0;
-                        questions.forEach(q => {
-                            if (q.type === 'vark' && q.varkMapping) {
-                                const studentAnswer = answers[q.id];
-                                const selectedIndex = (q.options || []).indexOf(studentAnswer as string);
-                                if (selectedIndex !== -1) {
-                                    const mapping = q.varkMapping[selectedIndex];
-                                    if (mapping && mapping in varkSummary) {
-                                        varkSummary[mapping as keyof typeof varkSummary]++;
-                                        varkCount++;
-                                    }
-                                }
-                            }
-                        });
-                        return {
-                            visual: varkCount > 0 ? varkSummary.V / varkCount : 0.25,
-                            auditory: varkCount > 0 ? varkSummary.A / varkCount : 0.25,
-                            readWrite: varkCount > 0 ? varkSummary.R / varkCount : 0.25,
-                            kinesthetic: varkCount > 0 ? varkSummary.K / varkCount : 0.25,
-                        };
-                    })();
-
                 // Implicit, behaviour-driven confidence (no self-report slider)
                 const confidence = calculateDynamicConfidence(
                     overallMetrics,
@@ -196,7 +169,6 @@ export function useQuizState() {
                     performanceScore: perfScore,
                     accuracyScore,
                     cognitive: cognitiveFeatures,
-                    vark: varkScores,
                     avgTimeToStart: overallMetrics.avgTimeToStart,
                     totalResponseLength: overallMetrics.totalResponseLength,
                     skippedQuestions: overallMetrics.skippedQuestions,
@@ -219,29 +191,6 @@ export function useQuizState() {
                     reflectionText
                 );
 
-                // Local fallback VARK calculation
-                let varkSummary = { V: 0, A: 0, R: 0, K: 0 };
-                let varkCount = 0;
-                questions.forEach(q => {
-                    if (q.type === 'vark' && q.varkMapping) {
-                        const studentAnswer = answers[q.id];
-                        const selectedIndex = (q.options || []).indexOf(studentAnswer as string);
-                        if (selectedIndex !== -1) {
-                            const mapping = q.varkMapping[selectedIndex];
-                            if (mapping && mapping in varkSummary) {
-                                varkSummary[mapping as keyof typeof varkSummary]++;
-                                varkCount++;
-                            }
-                        }
-                    }
-                });
-                const varkScores = {
-                    visual: varkCount > 0 ? varkSummary.V / varkCount : 0.25,
-                    auditory: varkCount > 0 ? varkSummary.A / varkCount : 0.25,
-                    readWrite: varkCount > 0 ? varkSummary.R / varkCount : 0.25,
-                    kinesthetic: varkCount > 0 ? varkSummary.K / varkCount : 0.25,
-                };
-
                 const result: ScenarioResult = {
                     scenarioNumber: currentScenarioNumber,
                     scenarioTitle: scenario?.title || `Round ${currentScenarioNumber}`,
@@ -257,7 +206,6 @@ export function useQuizState() {
                     performanceScore: calculatePerformanceScore(overallMetrics, confidence, accuracyScore, difficultyLevel),
                     accuracyScore,
                     cognitive: cognitiveFeatures,
-                    vark: varkScores,
                     avgTimeToStart: overallMetrics.avgTimeToStart,
                     totalResponseLength: overallMetrics.totalResponseLength,
                     skippedQuestions: overallMetrics.skippedQuestions,

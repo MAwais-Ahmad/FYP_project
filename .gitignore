@@ -12,9 +12,10 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# IDE
+# IDE & Assistant
 .vscode/
 .idea/
+.claude/
 
 # OCR Data files & temporary uploads
 *.traineddata

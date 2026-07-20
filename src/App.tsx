@@ -187,6 +187,20 @@ function App() {
         }
     };
 
+    // Abandon the in-progress scenario (mid-quiz exit). Unlike handleRestart,
+    // this preserves activeSessionId so a host/participant exiting a session
+    // test lands back on the session dashboard, not a generic one.
+    const handleExitQuiz = () => {
+        resetMetrics();
+        restartQuiz();
+        if (activeSessionId) {
+            setScreen('session-dashboard');
+        } else if (currentUser) {
+            setScreen('user-dashboard');
+        }
+        // else: restartQuiz() already left screen at 'welcome', correct for a guest.
+    };
+
     const handleViewRecord = (record: StudentRecord) => {
         setSelectedRecord(record);
         setScreen('record-detail');
@@ -303,7 +317,9 @@ function App() {
                     onStartAIScenario={handleStartAIScenario}
                     onStartCustomExam={handleStartCustomExam}
                     onBack={() => {
-                        if (currentUser) {
+                        if (activeSessionId) {
+                            setScreen('session-dashboard');
+                        } else if (currentUser) {
                             setScreen('user-dashboard');
                         } else {
                             goToWelcome();
@@ -338,6 +354,7 @@ function App() {
                     onStart={handleStartQuiz}
                     onViewAuth={() => setScreen('auth')}
                     onViewDashboard={currentUser ? () => setScreen('user-dashboard') : undefined}
+                    onBack={() => setScreen('assessment-setup')}
                     isLoading={isLoading}
                     userName={currentUser?.name}
                     isOffline={isOffline}
@@ -361,6 +378,7 @@ function App() {
                     onQuestionStart={recordQuestionStart}
                     onQuestionEnd={recordQuestionEnd}
                     onBacktrack={recordBacktrack}
+                    onExit={handleExitQuiz}
                 />
             )}
 
@@ -414,10 +432,12 @@ function App() {
                 />
             )}
 
-            {/* Global AI Diagnostic Tutor Chatbot */}
-            <AIChatDrawer
-                recordContext={selectedRecord || customExamResults || (scenarioResults.length > 0 ? scenarioResults[scenarioResults.length - 1] : null)}
-            />
+            {/* Global AI Diagnostic Tutor Chatbot (Only available before & after assessment, hidden during active test session) */}
+            {screen !== 'quiz' && (screen as string) !== 'custom-quiz' && (
+                <AIChatDrawer
+                    recordContext={selectedRecord || customExamResults || (scenarioResults.length > 0 ? scenarioResults[scenarioResults.length - 1] : null)}
+                />
+            )}
         </div>
     );
 }

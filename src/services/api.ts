@@ -170,6 +170,14 @@ export async function toggleSession(sessionId: string, isActive?: boolean): Prom
     return response.json();
 }
 
+export async function deleteSession(sessionId: string): Promise<{ success: boolean; error?: string }> {
+    const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+    });
+    return response.json();
+}
+
 // ─── EXISTING API (with auth headers injected) ──────────────────────────────
 
 interface GenerateScenarioResponse {
@@ -207,12 +215,6 @@ interface EvaluateScenarioResponse {
     evaluation: {
         accuracy_score: number;
         cognitive_features: CognitiveFeatures;
-        vark?: {
-            visual: number;
-            auditory: number;
-            readWrite: number;
-            kinesthetic: number;
-        };
     };
     usage: {
         tokens: number;
@@ -303,6 +305,7 @@ export async function generateExam(config: {
     materialText: string;
     mcqCount: number;
     shortCount: number;
+    longCount: number;
     totalMarks: number;
     difficulty: string;
 }): Promise<{ success: boolean; exam?: any; error?: string }> {

@@ -14,6 +14,15 @@ type CustomPaperMode = 'upload' | 'manual';
 
 const MARKS_PER_MCQ = 1;
 const MARKS_PER_SHORT = 3;
+const MARKS_PER_LONG = 6;
+const MAX_TOTAL_QUESTIONS = 40;
+
+// Display label + badge colour for each question type.
+const TYPE_META: Record<CustomQuestionType, { label: string; badge: string }> = {
+    mcq: { label: 'MCQ', badge: 'bg-sky-500/20 text-sky-300' },
+    short: { label: 'Short', badge: 'bg-fuchsia-500/20 text-fuchsia-300' },
+    long: { label: 'Long', badge: 'bg-amber-500/20 text-amber-300' },
+};
 
 export function AssessmentSetupScreen({
     onStartAIScenario,
@@ -41,6 +50,7 @@ export function AssessmentSetupScreen({
     const [materialText, setMaterialText] = useState('');
     const [mcqCount, setMcqCount] = useState(8);
     const [shortCount, setShortCount] = useState(2);
+    const [longCount, setLongCount] = useState(0);
     const [difficulty, setDifficulty] = useState<ExamDifficulty>('normal');
     const [isGenerating, setIsGenerating] = useState(false);
     const [generateError, setGenerateError] = useState('');
@@ -120,18 +130,24 @@ export function AssessmentSetupScreen({
             setGenerateError('Please enter a test/subject title (e.g. Physics Test 1)');
             return;
         }
-        if (mcqCount + shortCount < 1) {
+        const totalQuestions = mcqCount + shortCount + longCount;
+        if (totalQuestions < 1) {
             setGenerateError('Please request at least one question.');
+            return;
+        }
+        if (totalQuestions > MAX_TOTAL_QUESTIONS) {
+            setGenerateError(`Please request at most ${MAX_TOTAL_QUESTIONS} questions in total.`);
             return;
         }
         setIsGenerating(true);
         setGenerateError('');
 
-        const totalMarks = mcqCount * MARKS_PER_MCQ + shortCount * MARKS_PER_SHORT;
+        const totalMarks = mcqCount * MARKS_PER_MCQ + shortCount * MARKS_PER_SHORT + longCount * MARKS_PER_LONG;
         const result = await generateExam({
             materialText,
             mcqCount,
             shortCount,
+            longCount,
             totalMarks,
             difficulty,
         });
@@ -147,12 +163,16 @@ export function AssessmentSetupScreen({
 
     // ─── Manual entry helpers ───
     const addManualQuestion = (type: CustomQuestionType) => {
-        setManualQuestions(prev => [
-            ...prev,
-            type === 'mcq'
-                ? { id: prev.length + 1, type: 'mcq', marks: 1, question: '', options: ['', '', '', ''], correctAnswer: 'A', explanation: '' }
-                : { id: prev.length + 1, type: 'short', marks: 3, question: '', options: [], keyPoints: [''], explanation: '' },
-        ]);
+        setManualQuestions(prev => {
+            const id = prev.length + 1;
+            const q: CustomExamQuestion =
+                type === 'mcq'
+                    ? { id, type: 'mcq', marks: MARKS_PER_MCQ, question: '', options: ['', '', '', ''], correctAnswer: 'A', explanation: '' }
+                    : type === 'long'
+                    ? { id, type: 'long', marks: MARKS_PER_LONG, question: '', options: [], keyPoints: [''], explanation: '' }
+                    : { id, type: 'short', marks: MARKS_PER_SHORT, question: '', options: [], keyPoints: [''], explanation: '' };
+            return [...prev, q];
+        });
     };
 
     const updateManualQuestion = (index: number, field: string, value: any) => {
@@ -186,11 +206,15 @@ export function AssessmentSetupScreen({
     };
 
     const handleStartManualExam = () => {
-        const valid = manualQuestions.filter(q => {
-            if (!q.question.trim()) return false;
-            if (q.type === 'mcq') return q.options.every(o => o.trim());
-            return true; // written questions only need a prompt
-        });
+        const valid = manualQuestions
+            .filter(q => {
+                if (!q.question.trim()) return false;
+                if (q.type === 'mcq') return q.options.every(o => o.trim());
+                return true; // written questions only need a prompt
+            })
+            // Renumber ids sequentially so they match what the server expects when
+            // grading, even if some questions were skipped.
+            .map((q, i) => ({ ...q, id: i + 1 }));
         if (valid.length === 0) return;
         const total = valid.reduce((sum, q) => sum + q.marks, 0);
         onStartCustomExam({
@@ -208,7 +232,9 @@ export function AssessmentSetupScreen({
     };
 
     const manualTotalMarks = manualQuestions.reduce((s, q) => s + q.marks, 0);
-    const genTotalMarks = mcqCount * MARKS_PER_MCQ + shortCount * MARKS_PER_SHORT;
+    const genTotalCount = mcqCount + shortCount + longCount;
+    const genTotalMarks = mcqCount * MARKS_PER_MCQ + shortCount * MARKS_PER_SHORT + longCount * MARKS_PER_LONG;
+    const genOverLimit = genTotalCount > MAX_TOTAL_QUESTIONS;
 
     // ─── RENDER ──────────────────────────────────────────────────────────────────
 
@@ -243,8 +269,8 @@ export function AssessmentSetupScreen({
                                     <span className="bg-primary-500/20 text-primary-300 text-xs px-2 py-0.5 rounded-full shrink-0 mt-0.5">
                                         Q{i + 1} ({q.marks}m)
                                     </span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 mt-0.5 ${q.type === 'short' ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-sky-500/20 text-sky-300'}`}>
-                                        {q.type === 'short' ? 'Written' : 'MCQ'}
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 mt-0.5 ${TYPE_META[q.type].badge}`}>
+                                        {TYPE_META[q.type].label}
                                     </span>
                                     <p className="text-sm text-white/90">{q.question}</p>
                                 </div>
@@ -260,8 +286,10 @@ export function AssessmentSetupScreen({
                                         ))}
                                     </div>
                                 )}
-                                {q.type === 'short' && (
-                                    <p className="pl-8 text-xs text-white/40 italic">✍️ Written answer required</p>
+                                {(q.type === 'short' || q.type === 'long') && (
+                                    <p className="pl-8 text-xs text-white/40 italic">
+                                        ✍️ {q.type === 'long' ? 'Long written answer required' : 'Short written answer required'}
+                                    </p>
                                 )}
                             </div>
                         ))}
@@ -295,7 +323,7 @@ export function AssessmentSetupScreen({
 
                 <div className="absolute top-4 left-4 z-20">
                     <button onClick={onBack} className="btn-secondary !py-2 !px-4 text-sm">
-                        ← Dashboard
+                        ← Back
                     </button>
                 </div>
 
@@ -313,7 +341,7 @@ export function AssessmentSetupScreen({
                     </div>
 
                     <div className="grid gap-4">
-                        {/* AI Adaptive Scenario */}
+                        {/* General AI Scenario */}
                         <button
                             onClick={onStartAIScenario}
                             className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-primary-500/30"
@@ -321,9 +349,9 @@ export function AssessmentSetupScreen({
                             <div className="flex items-start gap-4">
                                 <div className="text-4xl group-hover:scale-110 transition-transform">🧠</div>
                                 <div className="space-y-1">
-                                    <h3 className="font-bold text-xl">AI Adaptive Scenario</h3>
+                                    <h3 className="font-bold text-xl">General AI Scenario</h3>
                                     <p className="text-white/50 text-sm leading-relaxed">
-                                        AI generates interactive dilemmas with sliders, rankings, and MCQs. Measures cognitive profile through behavioral telemetry across two adaptive rounds.
+                                        AI generates interactive dilemmas with sliders, rankings, and MCQs. Measures cognitive profile through behavioral telemetry across multiple rounds.
                                     </p>
                                     <span className="inline-block text-xs bg-primary-500/20 text-primary-300 px-2 py-0.5 rounded-full mt-1">
                                         Existing Flow
@@ -505,8 +533,8 @@ export function AssessmentSetupScreen({
                                     <div className="flex items-center justify-between flex-wrap gap-2">
                                         <div className="flex items-center gap-2">
                                             <h3 className="font-semibold text-sm text-primary-300">Question {qi + 1}</h3>
-                                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${q.type === 'short' ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-sky-500/20 text-sky-300'}`}>
-                                                {q.type === 'short' ? 'Written' : 'MCQ'}
+                                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${TYPE_META[q.type].badge}`}>
+                                                {TYPE_META[q.type].label}
                                             </span>
                                         </div>
                                         <div className="flex items-center gap-2">
@@ -596,18 +624,24 @@ export function AssessmentSetupScreen({
                                 </div>
                             ))}
 
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 flex-wrap">
                                 <button
                                     onClick={() => addManualQuestion('mcq')}
-                                    className="flex-1 glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
+                                    className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
                                 >
                                     + Add MCQ
                                 </button>
                                 <button
                                     onClick={() => addManualQuestion('short')}
-                                    className="flex-1 glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
+                                    className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
                                 >
-                                    + Add Written Question
+                                    + Add Short Question
+                                </button>
+                                <button
+                                    onClick={() => addManualQuestion('long')}
+                                    className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
+                                >
+                                    + Add Long Question
                                 </button>
                             </div>
 
@@ -718,41 +752,60 @@ export function AssessmentSetupScreen({
                             <input
                                 type="range"
                                 min={0}
-                                max={25}
+                                max={MAX_TOTAL_QUESTIONS}
                                 value={mcqCount}
                                 onChange={(e) => setMcqCount(parseInt(e.target.value))}
                                 className="w-full accent-primary-500"
                             />
                             <div className="flex justify-between text-xs text-white/30">
-                                <span>0</span><span>25</span>
+                                <span>0</span><span>{MAX_TOTAL_QUESTIONS}</span>
                             </div>
                         </div>
 
-                        {/* Written Count */}
+                        {/* Short-Answer Count */}
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
-                                <label className="text-sm text-white/70">Written / Short-Answer Questions</label>
+                                <label className="text-sm text-white/70">Short-Answer Questions <span className="text-white/30">({MARKS_PER_SHORT}m each)</span></label>
                                 <span className="text-lg font-bold text-fuchsia-300">{shortCount}</span>
                             </div>
                             <input
                                 type="range"
                                 min={0}
-                                max={10}
+                                max={20}
                                 value={shortCount}
                                 onChange={(e) => setShortCount(parseInt(e.target.value))}
                                 className="w-full accent-fuchsia-500"
                             />
                             <div className="flex justify-between text-xs text-white/30">
-                                <span>0</span><span>10</span>
+                                <span>0</span><span>20</span>
+                            </div>
+                        </div>
+
+                        {/* Long-Answer Count */}
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                                <label className="text-sm text-white/70">Long-Answer / Essay Questions <span className="text-white/30">({MARKS_PER_LONG}m each)</span></label>
+                                <span className="text-lg font-bold text-amber-300">{longCount}</span>
+                            </div>
+                            <input
+                                type="range"
+                                min={0}
+                                max={15}
+                                value={longCount}
+                                onChange={(e) => setLongCount(parseInt(e.target.value))}
+                                className="w-full accent-amber-500"
+                            />
+                            <div className="flex justify-between text-xs text-white/30">
+                                <span>0</span><span>15</span>
                             </div>
                         </div>
 
                         {/* Totals summary */}
-                        <div className="flex items-center gap-3 text-sm text-white/60 bg-white/5 rounded-xl p-3 flex-wrap">
-                            <span><span className="font-semibold text-white">{mcqCount + shortCount}</span> questions</span>
+                        <div className={`flex items-center gap-3 text-sm rounded-xl p-3 flex-wrap ${genOverLimit ? 'bg-red-500/10 text-red-300 border border-red-500/20' : 'bg-white/5 text-white/60'}`}>
+                            <span><span className="font-semibold text-white">{genTotalCount}</span> / {MAX_TOTAL_QUESTIONS} questions</span>
                             <span className="text-white/20">|</span>
                             <span><span className="font-semibold text-white">{genTotalMarks}</span> total marks</span>
-                            <span className="text-white/30 text-xs ml-auto">MCQ {MARKS_PER_MCQ}m · Written {MARKS_PER_SHORT}m each</span>
+                            {genOverLimit && <span className="w-full text-xs">⚠️ Max {MAX_TOTAL_QUESTIONS} questions total — reduce one of the counts.</span>}
                         </div>
 
                         {/* Difficulty */}
@@ -794,13 +847,13 @@ export function AssessmentSetupScreen({
                     {/* Generate Button */}
                     <button
                         onClick={handleGenerateExam}
-                        disabled={isGenerating || materialText.trim().length < 20 || (mcqCount + shortCount < 1)}
+                        disabled={isGenerating || materialText.trim().length < 20 || genTotalCount < 1 || genOverLimit}
                         className="btn-primary w-full !py-4 text-lg disabled:opacity-50"
                     >
                         {isGenerating ? (
                             <><span className="animate-spin">🤖</span> AI is generating your exam...</>
                         ) : (
-                            <>🚀 Generate {mcqCount + shortCount}-Question Exam</>
+                            <>🚀 Generate {genTotalCount}-Question Exam</>
                         )}
                     </button>
                 </div>

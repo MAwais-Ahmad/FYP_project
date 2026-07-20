@@ -21,14 +21,14 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
         return m > 0 ? `${m}m ${s}s` : `${s}s`;
     };
 
-    const gradedById: Record<number, { awardedMarks: number; correct?: boolean; feedback?: string }> = {};
+    const gradedById: Record<number, { awardedMarks: number; correct?: boolean; feedback?: string; pointsCovered?: number; totalPoints?: number }> = {};
     (graded || []).forEach(g => { gradedById[g.id] = g; });
 
     const answeredIds = Object.entries(selectedAnswers).filter(([, v]) => v && v.toString().trim().length > 0).map(([k]) => Number(k));
     const skippedCount = questions.length - answeredIds.length;
     const accuracyScore = totalMarks > 0 ? obtainedMarks / totalMarks : 0;
 
-    const hasWritten = questions.some(q => q.type === 'short');
+    const hasWritten = questions.some(q => q.type === 'short' || q.type === 'long');
 
     // Compute dynamic item-level timing metrics from questionTimes
     const times = Object.values(questionTimes);
@@ -216,7 +216,13 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
                             const g = gradedById[q.id];
                             const awarded = g ? g.awardedMarks : 0;
                             const isSkipped = !selected || selected.toString().trim().length === 0;
-                            const isWritten = q.type === 'short';
+                            const isWritten = q.type === 'short' || q.type === 'long';
+                            const typeLabel = q.type === 'long' ? 'Long' : q.type === 'short' ? 'Short' : 'MCQ';
+                            const typeBadge = q.type === 'long'
+                                ? 'bg-amber-500/20 text-amber-300'
+                                : q.type === 'short'
+                                ? 'bg-fuchsia-500/20 text-fuchsia-300'
+                                : 'bg-sky-500/20 text-sky-300';
                             const fullMarks = awarded >= q.marks && !isSkipped;
                             const partial = awarded > 0 && awarded < q.marks;
                             const timeSpent = questionTimes[q.id] || 0;
@@ -240,8 +246,8 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
                                             <div className="flex-1">
                                                 <p className="text-sm font-medium">
                                                     <span className="text-white/40">Q{i + 1}.</span> {q.question}
-                                                    <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${isWritten ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-sky-500/20 text-sky-300'}`}>
-                                                        {isWritten ? 'Written' : 'MCQ'}
+                                                    <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${typeBadge}`}>
+                                                        {typeLabel}
                                                     </span>
                                                 </p>
                                             </div>
@@ -285,6 +291,11 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard }: Cus
                                                     {isSkipped ? <span className="italic text-white/30">(no answer)</span> : selected}
                                                 </p>
                                             </div>
+                                            {q.type === 'long' && typeof g?.pointsCovered === 'number' && g?.totalPoints ? (
+                                                <p className="text-[11px] text-amber-300/80">
+                                                    ✔️ Covered {g.pointsCovered} of {g.totalPoints} expected points
+                                                </p>
+                                            ) : null}
                                             {g?.feedback && (
                                                 <p className="text-xs text-accent-300">
                                                     🧑‍🏫 {g.feedback}

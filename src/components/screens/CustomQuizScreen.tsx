@@ -138,7 +138,13 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
         onComplete(results);
     };
 
-    const isWritten = currentQuestion.type === 'short';
+    const isWritten = currentQuestion.type === 'short' || currentQuestion.type === 'long';
+    const typeLabel = currentQuestion.type === 'long' ? 'Long' : currentQuestion.type === 'short' ? 'Short' : 'MCQ';
+    const typeBadgeClass = currentQuestion.type === 'long'
+        ? 'bg-amber-500/20 text-amber-300'
+        : currentQuestion.type === 'short'
+        ? 'bg-fuchsia-500/20 text-fuchsia-300'
+        : 'bg-sky-500/20 text-sky-300';
     const currentAnswer = selectedAnswers[currentQuestion.id] || '';
 
     return (
@@ -159,8 +165,8 @@ export function CustomQuizScreen({ exam, onComplete, onBack }: CustomQuizScreenP
                         <span className="text-xs bg-primary-500/20 text-primary-300 px-2 py-0.5 rounded-full">
                             {currentQuestion.marks} mark{currentQuestion.marks > 1 ? 's' : ''}
                         </span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${isWritten ? 'bg-fuchsia-500/20 text-fuchsia-300' : 'bg-sky-500/20 text-sky-300'}`}>
-                            {isWritten ? 'Written' : 'MCQ'}
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${typeBadgeClass}`}>
+                            {typeLabel}
                         </span>
                     </div>
                     <div className="flex items-center gap-3">

@@ -19,7 +19,7 @@ export interface Scenario {
     totalTimeLimit?: number;
 }
 
-export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection' | 'slider' | 'vark';
+export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection' | 'slider';
 
 export interface Question {
     id: number;
@@ -30,7 +30,6 @@ export interface Question {
     question: string;
     hint?: string;
     options?: string[];
-    varkMapping?: string[];
     context?: string;
     urgentUpdate?: string;
     // Slider specific properties
@@ -129,7 +128,6 @@ export interface ScenarioResult {
     performanceScore: number;
     accuracyScore: number;
     cognitive: CognitiveFeatures;
-    vark?: { visual: number; auditory: number; readWrite: number; kinesthetic: number };
     avgTimeToStart: number;
     totalResponseLength: number;
     skippedQuestions: number;
@@ -165,28 +163,31 @@ export type AssessmentMode = 'ai-scenario' | 'custom-paper' | 'ai-material';
 
 export type ExamDifficulty = 'easy' | 'normal' | 'hard';
 
-// 'mcq' = multiple choice (auto-graded by key); 'short' = written/short-answer
-// (graded cumulatively by AI, and used for the cognitive text evaluation).
-export type CustomQuestionType = 'mcq' | 'short';
+// 'mcq' = multiple choice (auto-graded by key); 'short' = brief written answer;
+// 'long' = extended/essay answer graded by number of valid points covered.
+// 'short' and 'long' are both graded cumulatively by AI and feed the cognitive
+// text evaluation.
+export type CustomQuestionType = 'mcq' | 'short' | 'long';
 
 export interface CustomExamQuestion {
     id: number;
     type: CustomQuestionType;
     marks: number;
     question: string;
-    options: string[];        // empty array for 'short' questions
+    options: string[];        // empty array for written ('short'/'long') questions
     // Answer-key fields — present only in the server-side copy and in the graded
     // result returned AFTER submission. Stripped from the exam sent to the client
     // before the exam starts, so answers can never leak.
     correctAnswer?: string;   // MCQ letter (A–D)
     explanation?: string;
-    keyPoints?: string[];     // model answer bullet points for grading 'short'
+    keyPoints?: string[];     // model answer points for grading written questions
 }
 
 export interface ExamConfig {
     materialText: string;
     mcqCount: number;
     shortCount: number;
+    longCount: number;
     totalMarks: number;
     difficulty: ExamDifficulty;
 }
@@ -203,7 +204,9 @@ export interface GradedQuestion {
     id: number;
     awardedMarks: number;
     correct?: boolean;        // MCQ only
-    feedback?: string;        // short-answer AI feedback
+    feedback?: string;        // written-answer AI feedback
+    pointsCovered?: number;   // long-answer: valid points the student covered
+    totalPoints?: number;     // long-answer: expected key points count
 }
 
 export interface ExamGradingResult {

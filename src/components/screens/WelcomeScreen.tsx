@@ -4,12 +4,13 @@ interface WelcomeScreenProps {
     onStart: (difficultyLevel: number, name: string) => void;
     onViewAuth: () => void;
     onViewDashboard?: () => void;
+    onBack?: () => void;
     isLoading: boolean;
     userName?: string;
     isOffline?: boolean;
 }
 
-export function WelcomeScreen({ onStart, onViewAuth, onViewDashboard, isLoading, userName, isOffline = false }: WelcomeScreenProps) {
+export function WelcomeScreen({ onStart, onViewAuth, onViewDashboard, onBack, isLoading, userName, isOffline = false }: WelcomeScreenProps) {
     const [name, setName] = useState(userName || '');
 
     return (
@@ -22,6 +23,15 @@ export function WelcomeScreen({ onStart, onViewAuth, onViewDashboard, isLoading,
                 <div className="absolute top-0 left-0 right-0 bg-yellow-500/20 border-b border-yellow-500/30 text-yellow-300 py-3 px-4 text-center text-sm font-medium z-50 flex items-center justify-center gap-2 backdrop-blur-md">
                     <span>⚠️</span>
                     <span>You are currently offline. A stable internet connection is required to generate new AI-powered scenarios. You can still view your cached Dashboard.</span>
+                </div>
+            )}
+
+            {/* Top-left back navigation */}
+            {onBack && (
+                <div className="absolute top-4 left-4 z-20">
+                    <button onClick={onBack} className="btn-secondary !py-2 !px-4 text-sm">
+                        ← Back
+                    </button>
                 </div>
             )}
 
@@ -68,7 +78,7 @@ export function WelcomeScreen({ onStart, onViewAuth, onViewDashboard, isLoading,
                                 <span>2.</span> Cognitive Diagnostics
                             </h3>
                             <p className="text-white/60 leading-relaxed text-xs">
-                                AI calculates your VARK preferences, Reflection Depth, Self-Awareness, and Creativity in real time.
+                                AI calculates your Reflection Depth, Self-Awareness, and Creativity in real time.
                             </p>
                         </div>
                     </div>
