@@ -9,7 +9,7 @@ const { PrismaClient } = require('@prisma/client');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const OPENROUTER_MODEL = 'meta-llama/llama-3.1-8b-instruct:free';
+const OPENROUTER_MODEL = 'google/gemma-2-9b-it:free';
 const OPENAI_MODEL = 'gpt-4o-mini';
 
 const openrouterClient = process.env.OPENROUTER_API_KEY

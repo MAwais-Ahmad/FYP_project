@@ -43,6 +43,12 @@ model Session {
   isActive    Boolean         @default(true)
   createdAt   DateTime        @default(now())
 
+  // Host-authored assessment every participant takes. Null until the host
+  // creates it (participants "wait" until then). Shape:
+  //   { kind: 'custom-exam', exam: { examTitle, totalMarks, questions:[…with answer key] } }
+  //   { kind: 'ai-scenario', scenario: {…}, questions: [Question[]], difficultyLevel }
+  assessment  Json?
+
   members     SessionMember[]
 }
 
