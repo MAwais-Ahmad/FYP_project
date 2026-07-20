@@ -27,16 +27,40 @@ const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-async function callAiCompletion(params) {
+// ─── HIGH-PRECISION ENGINE: Primary = OpenAI (gpt-4o-mini), Fallback = OpenRouter
+// Powers Exam Generation, Scenario Generation, Paper Parsing, & Cognitive Auto-Grading
+async function callHighPrecisionAI(params) {
+  if (openaiClient) {
+    try {
+      return await openaiClient.chat.completions.create({
+        ...params,
+        model: OPENAI_MODEL,
+      });
+    } catch (err) {
+      console.warn(`⚠️ Primary OpenAI (${OPENAI_MODEL}) failed: ${err.message}. Trying OpenRouter fallback...`);
+    }
+  }
+
+  if (openrouterClient) {
+    return await openrouterClient.chat.completions.create({
+      ...params,
+      model: OPENROUTER_MODEL,
+    });
+  }
+
+  throw new Error('No working AI API key available for high-precision tasks');
+}
+
+// ─── CHATBOT ENGINE: Primary = OpenRouter Free Tier ($0 cost), Fallback = OpenAI
+async function callChatbotAI(params) {
   if (openrouterClient) {
     try {
-      const res = await openrouterClient.chat.completions.create({
+      return await openrouterClient.chat.completions.create({
         ...params,
         model: OPENROUTER_MODEL,
       });
-      return res;
     } catch (err) {
-      console.warn(`⚠️ OpenRouter (${OPENROUTER_MODEL}) failed: ${err.message}. Falling back to OpenAI (${OPENAI_MODEL})...`);
+      console.warn(`⚠️ Primary OpenRouter (${OPENROUTER_MODEL}) failed: ${err.message}. Falling back to OpenAI (${OPENAI_MODEL})...`);
     }
   }
 
@@ -47,11 +71,11 @@ async function callAiCompletion(params) {
     });
   }
 
-  throw new Error('No working AI API key available');
+  throw new Error('No working AI API key available for Chatbot');
 }
 
-const MODEL = OPENROUTER_MODEL;
-const openai = { chat: { completions: { create: callAiCompletion } } };
+const MODEL = OPENAI_MODEL;
+const openai = { chat: { completions: { create: callHighPrecisionAI } } };
 
 const prisma = new PrismaClient();
 
@@ -1199,9 +1223,9 @@ const TYPE_SPEC = {
 // under-deliver on large single-batch requests, we retry (with an avoid-list to
 // prevent duplicates) until we hit the count or run out of attempts. Returns
 // { questions, tokens }. Generating one type per call keeps the model on-count.
-async function generateQuestionsForType(materialText, type, count, difficulty) {
+async function generateQuestionsForType(materialText, type, count, difficulty, marksOverride) {
   if (count < 1) return { questions: [], tokens: 0 };
-  const marks = DEFAULT_MARKS[type];
+  const marks = Number.isFinite(marksOverride) ? marksOverride : DEFAULT_MARKS[type];
   const collected = [];
   let tokens = 0;
 
@@ -1242,7 +1266,7 @@ ${materialText.substring(0, 12000)}`;
       const text = String(q.question || '').trim();
       if (!text) continue;
       const dup = collected.some(c => c.question.trim().toLowerCase() === text.toLowerCase());
-      if (!dup) collected.push({ ...q, type });
+      if (!dup) collected.push({ ...q, type, marks }); // force teacher-set marks
     }
 
     if (got.length === 0) break; // model produced nothing usable — stop retrying
@@ -1256,7 +1280,8 @@ ${materialText.substring(0, 12000)}`;
 // requested count), then all are grouped MCQ → short → long and renumbered.
 app.post('/api/generate-exam', async (req, res) => {
   try {
-    let { materialText, mcqCount, shortCount, longCount, questionCount, difficulty = 'normal' } = req.body;
+    let { materialText, mcqCount, shortCount, longCount, questionCount, difficulty = 'normal',
+          mcqMarks, shortMarks, longMarks, manualQuestions } = req.body;
 
     // Backward-compat: an old client sending only questionCount → treat as all MCQ.
     mcqCount = Number.isFinite(mcqCount) ? mcqCount : (Number.isFinite(questionCount) ? questionCount : 10);
@@ -1266,28 +1291,45 @@ app.post('/api/generate-exam', async (req, res) => {
     shortCount = Math.max(0, Math.min(MAX_TOTAL_QUESTIONS, Math.round(shortCount)));
     longCount = Math.max(0, Math.min(MAX_TOTAL_QUESTIONS, Math.round(longCount)));
 
+    // Editable per-type marks (clamped; default to the standard values).
+    const clampMarks = (v, d) => (Number.isFinite(v) ? Math.max(1, Math.min(20, Math.round(v))) : d);
+    const mMarks = clampMarks(mcqMarks, DEFAULT_MARKS.mcq);
+    const sMarks = clampMarks(shortMarks, DEFAULT_MARKS.short);
+    const lMarks = clampMarks(longMarks, DEFAULT_MARKS.long);
+
+    // Teacher's own hand-written questions (full, with answer keys). Marks already
+    // set client-side per type, but re-clamped here for safety.
+    const manual = Array.isArray(manualQuestions)
+      ? normalizeExamQuestions(manualQuestions, { reorder: false }).map(q => ({
+          ...q,
+          marks: q.type === 'mcq' ? mMarks : q.type === 'long' ? lMarks : sMarks,
+        }))
+      : [];
+
     const totalRequested = mcqCount + shortCount + longCount;
-    if (totalRequested < 1) {
-      return res.status(400).json({ success: false, error: 'Please request at least one question.' });
+    if (totalRequested + manual.length < 1) {
+      return res.status(400).json({ success: false, error: 'Please add at least one question.' });
     }
     if (totalRequested > MAX_TOTAL_QUESTIONS) {
-      return res.status(400).json({ success: false, error: `Please request at most ${MAX_TOTAL_QUESTIONS} questions in total.` });
+      return res.status(400).json({ success: false, error: `Please request at most ${MAX_TOTAL_QUESTIONS} AI questions in total.` });
     }
-    if (!materialText || materialText.trim().length < 20) {
+    // Material is only required when the AI must generate questions.
+    if (totalRequested > 0 && (!materialText || materialText.trim().length < 20)) {
       return res.status(400).json({ success: false, error: 'Please provide study material text (at least 20 characters).' });
     }
 
     // Generate all three types concurrently, each guaranteed to its count.
     const [mcqRes, shortRes, longRes] = await Promise.all([
-      generateQuestionsForType(materialText, 'mcq', mcqCount, difficulty),
-      generateQuestionsForType(materialText, 'short', shortCount, difficulty),
-      generateQuestionsForType(materialText, 'long', longCount, difficulty),
+      generateQuestionsForType(materialText, 'mcq', mcqCount, difficulty, mMarks),
+      generateQuestionsForType(materialText, 'short', shortCount, difficulty, sMarks),
+      generateQuestionsForType(materialText, 'long', longCount, difficulty, lMarks),
     ]);
 
-    const rawCombined = [...mcqRes.questions, ...shortRes.questions, ...longRes.questions];
+    // Merge AI-generated with the teacher's own, then group MCQ→short→long + renumber.
+    const rawCombined = [...mcqRes.questions, ...shortRes.questions, ...longRes.questions, ...manual];
     const questions = normalizeExamQuestions(rawCombined, { reorder: true });
     if (questions.length === 0) {
-      return res.status(500).json({ success: false, error: 'AI did not return any usable questions. Please try again.' });
+      return res.status(500).json({ success: false, error: 'No usable questions were produced. Please try again.' });
     }
 
     const fullExam = {
@@ -1301,7 +1343,7 @@ app.post('/api/generate-exam', async (req, res) => {
     const mcqN = questions.filter(q => q.type === 'mcq').length;
     const shortN = questions.filter(q => q.type === 'short').length;
     const longN = questions.filter(q => q.type === 'long').length;
-    console.log(`✅ Generated exam (${mcqN}/${mcqCount} MCQ + ${shortN}/${shortCount} short + ${longN}/${longCount} long, ${fullExam.totalMarks} marks, ${difficulty})`);
+    console.log(`✅ Generated exam (${mcqN} MCQ + ${shortN} short + ${longN} long incl ${manual.length} manual, ${fullExam.totalMarks} marks, ${difficulty})`);
 
     res.json({ success: true, exam: stripExamForClient(fullExam, examId) });
   } catch (err) {
@@ -1835,17 +1877,39 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    const systemPrompt = `You are AITA Core AI — the official Intelligent Tutor & Diagnostic Assistant for the AITA (Adaptive Diagnostic & Cognitive Profiler) platform.
+    let formattedActiveContext = '';
+    if (recordContext) {
+      formattedActiveContext = `
 
-YOUR RESPONSIBILITIES & PERSONA:
-1. Academic, encouraging, highly analytical AI tutor and teacher assistant.
-2. Explain cognitive profiles (Fast Learner, Strategic Thinker, Slow & Thorough, Steady Achiever, Quick & Careless, Inconsistent Performer, Concept Struggler, Ignorant/Avoider) based on accuracy, response speed, answer revisions, and confidence calibration.
-3. Help students understand test questions, core concepts, and why options are correct or incorrect.
-4. Assist teachers by looking up student results, summarizing performance in tests (e.g., "Physics Test 1"), and highlighting students who need support.
-5. STRICT GUARDRAIL: Speak authoritatively about AITA's advanced AI multi-dimensional diagnostic classification engine. NEVER mention internal fallback rules or technical system limitations. Speak with 100% confidence about the platform's features.
+ACTIVE ASSESSMENT CONTEXT:
+- Student Name: ${recordContext.name || recordContext.studentName || 'Student'}
+- Primary Learner Category: ${recordContext.primaryName || recordContext.primaryCategory || 'N/A'} ${recordContext.primaryEmoji || ''}
+- Category Confidence: ${recordContext.primaryConfidence ? Math.round(recordContext.primaryConfidence * 100) + '%' : 'N/A'}
+- Overall Performance / Score: ${recordContext.obtainedMarks !== undefined ? recordContext.obtainedMarks + '/' + recordContext.totalMarks : recordContext.performanceScore !== undefined ? Math.round(recordContext.performanceScore * 100) + '%' : 'N/A'}
+- Decision Speed: ${recordContext.avgResponseTime || recordContext.overall?.avgResponseTime ? (recordContext.avgResponseTime || recordContext.overall?.avgResponseTime) + 's avg' : 'N/A'}
+- Decision Style: ${recordContext.decisionStyle || recordContext.overall?.decisionStyle || 'N/A'}
+- Answer Changes / Revisions: ${recordContext.totalAnswerChanges ?? recordContext.overall?.totalAnswerChanges ?? 0}
+- Backtrack Count: ${recordContext.backtrackCount ?? recordContext.overall?.backtrackCount ?? 0}
+- Behavioral Confidence: ${recordContext.confidence !== undefined ? recordContext.confidence + '/10' : 'N/A'}`;
+    }
 
-FORMATTING:
-- Use bullet points, bold text, and clean GitHub-style markdown. Keep responses clear and concise.${recordContext ? `\n\nACTIVE TEST RESULT CONTEXT:\n${JSON.stringify(recordContext, null, 2)}` : ''}${databaseContextStr}`;
+    const systemPrompt = `You are AITA Core AI — the premier Intelligent Academic & Diagnostic Assistant for the AITA Platform (Adaptive Diagnostic & Cognitive Profiler).
+
+🎯 YOUR PERSONA & RESPONSE GOALS:
+1. Highly intelligent, encouraging, concise, and structured academic mentor.
+2. EFFICIENT & ELEGANT ANSWERS: Never dump raw JSON, raw database rows, or rough unformatted text. Synthesize data into clean executive summaries, neat bullet points, bold section headers, and clear logical reasoning.
+3. EASY TO UNDERSTAND: The user must grasp what they want immediately without effort. Avoid walls of text.
+
+🧠 CORE CAPABILITIES:
+- **For Students**: Explain cognitive profiles (*Fast Learner*, *Strategic Thinker*, *Slow & Thorough*, *Steady Achiever*, *Quick & Careless*, *Inconsistent Performer*, *Concept Struggler*, *Ignorant/Avoider*). Break down why options are correct or incorrect, and suggest actionable learning strategies.
+- **For Teachers**: Summarize student results, highlight top performers vs students needing support, and explain behavioral telemetry (decision speed, revisions, backtracks, confidence calibration).
+- **Platform Knowledge**: Explain AITA features (Bloom's Taxonomy difficulty scaling, AI Scenario Generator, PDF Custom Exam Creator, behavioral telemetry tracking).
+- **STRICT GUARDRAIL**: Speak authoritatively about AITA's multi-dimensional cognitive classification engine. Never mention internal technical fallbacks or system limitations. Speak with 100% confidence.
+
+FORMATTING & STYLE RULES:
+- Start with a direct, clean answer or brief 1-sentence executive summary.
+- Use clear bullet points and bold section headers.
+- Keep responses concise unless the user explicitly asks for deep step-by-step detail.${formattedActiveContext}${databaseContextStr}`;
 
     const apiMessages = [
       { role: 'system', content: systemPrompt },
@@ -1854,42 +1918,15 @@ FORMATTING:
 
     let reply = '';
 
-    // Attempt 1: OpenRouter Free API (if key present)
-    if (process.env.OPENROUTER_API_KEY) {
-      try {
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://aita-platform.local',
-            'X-Title': 'AITA Platform',
-          },
-          body: JSON.stringify({
-            model: 'meta-llama/llama-3.3-70b-instruct:free',
-            messages: apiMessages,
-            temperature: 0.7,
-          }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          reply = data.choices?.[0]?.message?.content || '';
-        }
-      } catch (err) {
-        console.log('OpenRouter chat fallback to OpenAI:', err.message);
-      }
-    }
-
-    // Attempt 2: OpenAI Fallback
-    if (!reply && process.env.OPENAI_API_KEY) {
-      const response = await openai.chat.completions.create({
-        model: MODEL,
+    try {
+      const response = await callChatbotAI({
         messages: apiMessages,
         temperature: 0.7,
       });
       reply = response.choices?.[0]?.message?.content || '';
       totalTokensUsed += response.usage?.total_tokens || 0;
+    } catch (err) {
+      console.error('Chat AI call error:', err.message);
     }
 
     if (!reply) {

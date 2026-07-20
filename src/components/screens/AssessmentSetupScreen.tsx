@@ -31,6 +31,160 @@ const TYPE_META: Record<CustomQuestionType, { label: string; badge: string }> = 
     long: { label: 'Long', badge: 'bg-amber-500/20 text-amber-300' },
 };
 
+const DEFAULT_TYPE_MARKS = { mcq: MARKS_PER_MCQ, short: MARKS_PER_SHORT, long: MARKS_PER_LONG };
+
+// Reusable editor for a list of hand-written questions (MCQ / short / long).
+// Used both for the standalone Custom Paper manual mode and for the "add your own
+// questions" section of the AI-material hybrid exam. When perTypeMarks is given,
+// each question's marks are governed by its type (no per-question marks input).
+function ManualQuestionsEditor({
+    questions,
+    onChange,
+    perTypeMarks,
+}: {
+    questions: CustomExamQuestion[];
+    onChange: (q: CustomExamQuestion[]) => void;
+    perTypeMarks?: { mcq: number; short: number; long: number };
+}) {
+    const markFor = (type: CustomQuestionType) => (perTypeMarks ? perTypeMarks[type] : DEFAULT_TYPE_MARKS[type]);
+
+    const add = (type: CustomQuestionType) => {
+        const id = questions.length + 1;
+        const base = { id, marks: markFor(type), question: '', explanation: '' };
+        const q: CustomExamQuestion =
+            type === 'mcq'
+                ? { ...base, type: 'mcq', options: ['', '', '', ''], correctAnswer: 'A' }
+                : { ...base, type, options: [], keyPoints: [''] };
+        onChange([...questions, q]);
+    };
+    const updateQ = (index: number, field: string, value: any) => {
+        const updated = [...questions];
+        (updated[index] as any)[field] = value;
+        onChange(updated);
+    };
+    const updateOpt = (qi: number, oi: number, value: string) => {
+        const updated = [...questions];
+        updated[qi] = { ...updated[qi], options: updated[qi].options.map((o, i) => (i === oi ? value : o)) };
+        onChange(updated);
+    };
+    const updateKP = (qi: number, ki: number, value: string) => {
+        const updated = [...questions];
+        const kp = [...(updated[qi].keyPoints || [])];
+        kp[ki] = value;
+        updated[qi] = { ...updated[qi], keyPoints: kp };
+        onChange(updated);
+    };
+    const remove = (index: number) => onChange(questions.filter((_, i) => i !== index).map((q, i) => ({ ...q, id: i + 1 })));
+
+    return (
+        <div className="space-y-4">
+            {questions.map((q, qi) => (
+                <div key={qi} className="glass-card p-4 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                            <h3 className="font-semibold text-sm text-primary-300">Question {qi + 1}</h3>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${TYPE_META[q.type].badge}`}>{TYPE_META[q.type].label}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {perTypeMarks ? (
+                                <span className="text-xs text-white/40">{markFor(q.type)} mark{markFor(q.type) > 1 ? 's' : ''}</span>
+                            ) : (
+                                <>
+                                    <label className="text-xs text-white/40">Marks:</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={20}
+                                        value={q.marks}
+                                        onChange={(e) => updateQ(qi, 'marks', parseInt(e.target.value) || 1)}
+                                        className="text-input !w-16 !py-1 text-center text-sm"
+                                    />
+                                </>
+                            )}
+                            {questions.length > 1 && (
+                                <button onClick={() => remove(qi)} className="text-red-400 hover:text-red-300 text-sm px-2">✕</button>
+                            )}
+                        </div>
+                    </div>
+
+                    <input
+                        type="text"
+                        placeholder="Enter question text..."
+                        value={q.question}
+                        onChange={(e) => updateQ(qi, 'question', e.target.value)}
+                        className="text-input text-sm"
+                    />
+
+                    {q.type === 'mcq' ? (
+                        <>
+                            <div className="grid grid-cols-2 gap-2">
+                                {['A', 'B', 'C', 'D'].map((letter, oi) => (
+                                    <input
+                                        key={letter}
+                                        type="text"
+                                        placeholder={`${letter}) Option...`}
+                                        value={q.options[oi]}
+                                        onChange={(e) => updateOpt(qi, oi, e.target.value)}
+                                        className="text-input text-sm"
+                                    />
+                                ))}
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <label className="text-xs text-white/40">Correct Answer:</label>
+                                <div className="flex gap-2">
+                                    {['A', 'B', 'C', 'D'].map((letter) => (
+                                        <button
+                                            key={letter}
+                                            onClick={() => updateQ(qi, 'correctAnswer', letter)}
+                                            className={`w-8 h-8 rounded-lg text-sm font-bold transition-all ${
+                                                q.correctAnswer === letter ? 'bg-green-500 text-white shadow-lg' : 'bg-white/10 text-white/50 hover:bg-white/20'
+                                            }`}
+                                        >
+                                            {letter}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="space-y-2">
+                            <label className="text-xs text-white/40">Model answer key points (used for AI grading)</label>
+                            {(q.keyPoints || ['']).map((kp, ki) => (
+                                <input
+                                    key={ki}
+                                    type="text"
+                                    placeholder={`Key point ${ki + 1}...`}
+                                    value={kp}
+                                    onChange={(e) => updateKP(qi, ki, e.target.value)}
+                                    className="text-input text-sm"
+                                />
+                            ))}
+                            <button
+                                onClick={() => updateQ(qi, 'keyPoints', [...(q.keyPoints || []), ''])}
+                                className="text-xs text-primary-300 hover:text-primary-200"
+                            >
+                                + Add key point
+                            </button>
+                        </div>
+                    )}
+                </div>
+            ))}
+
+            <div className="flex gap-2 flex-wrap">
+                <button onClick={() => add('mcq')} className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20">
+                    + Add MCQ
+                </button>
+                <button onClick={() => add('short')} className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20">
+                    + Add Short Question
+                </button>
+                <button onClick={() => add('long')} className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20">
+                    + Add Long Question
+                </button>
+            </div>
+        </div>
+    );
+}
+
 export function AssessmentSetupScreen({
     onStartAIScenario,
     onStartCustomExam,
@@ -71,6 +225,12 @@ export function AssessmentSetupScreen({
     const [mcqCount, setMcqCount] = useState(8);
     const [shortCount, setShortCount] = useState(2);
     const [longCount, setLongCount] = useState(0);
+    // Editable per-type marks (teacher can change; defaults 1/3/6).
+    const [mcqMarks, setMcqMarks] = useState(MARKS_PER_MCQ);
+    const [shortMarks, setShortMarks] = useState(MARKS_PER_SHORT);
+    const [longMarks, setLongMarks] = useState(MARKS_PER_LONG);
+    // Teacher's own hand-written questions merged into the AI-generated exam.
+    const [bonusQuestions, setBonusQuestions] = useState<CustomExamQuestion[]>([]);
     const [difficulty, setDifficulty] = useState<ExamDifficulty>('normal');
     const [isGenerating, setIsGenerating] = useState(false);
     const [generateError, setGenerateError] = useState('');
@@ -83,10 +243,20 @@ export function AssessmentSetupScreen({
     // Preview state
     const [previewExam, setPreviewExam] = useState<GeneratedExam | null>(null);
 
-    // ─── Document Upload Handler (supports multiple files) ───
+    // ─── Document Upload Handler ───
+    // Custom Paper accepts a single file; AI-material accepts up to 7.
     const handleDocUpload = async (files: FileList, target: 'paper' | 'material') => {
         const fileArr = Array.from(files);
         if (fileArr.length === 0) return;
+
+        const limit = target === 'paper' ? 1 : 7;
+        if (fileArr.length > limit) {
+            const msg = target === 'paper'
+                ? 'The Custom Paper mode accepts only 1 file. Please select a single document.'
+                : 'You can upload at most 7 files for an AI material exam. Please select fewer files.';
+            if (target === 'paper') setUploadError(msg); else setGenerateError(msg);
+            return;
+        }
 
         if (target === 'paper') {
             setIsUploading(true);
@@ -143,32 +313,50 @@ export function AssessmentSetupScreen({
         }
     };
 
-    // ─── Generate exam from material ───
+    // Teacher's own questions that are actually filled in (valid), with marks set
+    // by the current per-type marks. Merged into the AI-generated exam.
+    const validBonusQuestions = (): CustomExamQuestion[] =>
+        bonusQuestions
+            .filter(q => {
+                if (!q.question.trim()) return false;
+                if (q.type === 'mcq') return q.options.every(o => o.trim());
+                return true;
+            })
+            .map(q => ({ ...q, marks: q.type === 'mcq' ? mcqMarks : q.type === 'long' ? longMarks : shortMarks }));
+
+    // ─── Generate exam from material (AI questions + teacher's own, merged) ───
     const handleGenerateExam = async () => {
-        if (!materialText.trim()) return;
         if (!examTitle.trim()) {
             setGenerateError('Please enter a test/subject title (e.g. Physics Test 1)');
             return;
         }
-        const totalQuestions = mcqCount + shortCount + longCount;
-        if (totalQuestions < 1) {
-            setGenerateError('Please request at least one question.');
+        const bonus = validBonusQuestions();
+        const aiTotal = mcqCount + shortCount + longCount;
+        if (aiTotal + bonus.length < 1) {
+            setGenerateError('Add at least one question — set an AI count above 0 or add your own.');
             return;
         }
-        if (totalQuestions > MAX_TOTAL_QUESTIONS) {
-            setGenerateError(`Please request at most ${MAX_TOTAL_QUESTIONS} questions in total.`);
+        // AI generation needs material; teacher-only papers (aiTotal 0) don't.
+        if (aiTotal > 0 && materialText.trim().length < 20) {
+            setGenerateError('Please provide study material (or set all AI counts to 0 and add your own questions).');
+            return;
+        }
+        if (aiTotal > MAX_TOTAL_QUESTIONS) {
+            setGenerateError(`Please request at most ${MAX_TOTAL_QUESTIONS} AI questions in total.`);
             return;
         }
         setIsGenerating(true);
         setGenerateError('');
 
-        const totalMarks = mcqCount * MARKS_PER_MCQ + shortCount * MARKS_PER_SHORT + longCount * MARKS_PER_LONG;
         const result = await generateExam({
             materialText,
             mcqCount,
             shortCount,
             longCount,
-            totalMarks,
+            mcqMarks,
+            shortMarks,
+            longMarks,
+            manualQuestions: bonus,
             difficulty,
         });
         setIsGenerating(false);
@@ -181,50 +369,7 @@ export function AssessmentSetupScreen({
         }
     };
 
-    // ─── Manual entry helpers ───
-    const addManualQuestion = (type: CustomQuestionType) => {
-        setManualQuestions(prev => {
-            const id = prev.length + 1;
-            const q: CustomExamQuestion =
-                type === 'mcq'
-                    ? { id, type: 'mcq', marks: MARKS_PER_MCQ, question: '', options: ['', '', '', ''], correctAnswer: 'A', explanation: '' }
-                    : type === 'long'
-                    ? { id, type: 'long', marks: MARKS_PER_LONG, question: '', options: [], keyPoints: [''], explanation: '' }
-                    : { id, type: 'short', marks: MARKS_PER_SHORT, question: '', options: [], keyPoints: [''], explanation: '' };
-            return [...prev, q];
-        });
-    };
-
-    const updateManualQuestion = (index: number, field: string, value: any) => {
-        setManualQuestions(prev => {
-            const updated = [...prev];
-            (updated[index] as any)[field] = value;
-            return updated;
-        });
-    };
-
-    const updateManualOption = (qIndex: number, optIndex: number, value: string) => {
-        setManualQuestions(prev => {
-            const updated = [...prev];
-            updated[qIndex].options[optIndex] = value;
-            return updated;
-        });
-    };
-
-    const updateKeyPoint = (qIndex: number, kpIndex: number, value: string) => {
-        setManualQuestions(prev => {
-            const updated = [...prev];
-            const kp = [...(updated[qIndex].keyPoints || [])];
-            kp[kpIndex] = value;
-            updated[qIndex].keyPoints = kp;
-            return updated;
-        });
-    };
-
-    const removeManualQuestion = (index: number) => {
-        setManualQuestions(prev => prev.filter((_, i) => i !== index).map((q, i) => ({ ...q, id: i + 1 })));
-    };
-
+    // ─── Manual entry ───
     const handleStartManualExam = () => {
         const valid = manualQuestions
             .filter(q => {
@@ -252,9 +397,17 @@ export function AssessmentSetupScreen({
     };
 
     const manualTotalMarks = manualQuestions.reduce((s, q) => s + q.marks, 0);
-    const genTotalCount = mcqCount + shortCount + longCount;
-    const genTotalMarks = mcqCount * MARKS_PER_MCQ + shortCount * MARKS_PER_SHORT + longCount * MARKS_PER_LONG;
-    const genOverLimit = genTotalCount > MAX_TOTAL_QUESTIONS;
+    // AI-material tab totals — include the teacher's own (bonus) questions.
+    const bonusValid = bonusQuestions.filter(q => q.question.trim() && (q.type !== 'mcq' || q.options.every(o => o.trim())));
+    const bonusMcq = bonusValid.filter(q => q.type === 'mcq').length;
+    const bonusShort = bonusValid.filter(q => q.type === 'short').length;
+    const bonusLong = bonusValid.filter(q => q.type === 'long').length;
+    const genTotalCount = mcqCount + shortCount + longCount + bonusValid.length;
+    const genTotalMarks =
+        (mcqCount + bonusMcq) * mcqMarks +
+        (shortCount + bonusShort) * shortMarks +
+        (longCount + bonusLong) * longMarks;
+    const genOverLimit = (mcqCount + shortCount + longCount) > MAX_TOTAL_QUESTIONS;
 
     // ─── RENDER ──────────────────────────────────────────────────────────────────
 
@@ -524,7 +677,6 @@ export function AssessmentSetupScreen({
                                 <input
                                     ref={fileInputRef}
                                     type="file"
-                                    multiple
                                     accept=".pdf,.pptx,.ppt,.docx,.txt"
                                     className="hidden"
                                     onChange={(e) => {
@@ -534,20 +686,19 @@ export function AssessmentSetupScreen({
                                 {isUploading ? (
                                     <div className="space-y-2">
                                         <div className="text-4xl animate-spin">⏳</div>
-                                        <p className="text-white/60">Extracting text from document(s)...</p>
+                                        <p className="text-white/60">Extracting text from document...</p>
                                     </div>
                                 ) : paperFiles.length > 0 ? (
                                     <div className="space-y-2">
                                         <div className="text-4xl">✅</div>
-                                        <p className="text-green-300 font-semibold">{paperFiles.length} file{paperFiles.length > 1 ? 's' : ''} loaded</p>
-                                        <p className="text-white/50 text-xs break-words">{paperFiles.join(', ')}</p>
-                                        <p className="text-white/40 text-xs">Click to replace with different file(s)</p>
+                                        <p className="text-green-300 font-semibold">{paperFiles[0]}</p>
+                                        <p className="text-white/40 text-xs">Click to replace with a different file</p>
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
                                         <div className="text-4xl">📤</div>
-                                        <p className="text-white/70 font-medium">Click to upload one or more exam papers</p>
-                                        <p className="text-white/40 text-xs">Select multiple: PDF, PowerPoint (.pptx), Word (.docx), TXT (Max 15MB each)</p>
+                                        <p className="text-white/70 font-medium">Click to upload one exam paper</p>
+                                        <p className="text-white/40 text-xs">1 file: PDF, PowerPoint (.pptx), Word (.docx), TXT (Max 15MB)</p>
                                     </div>
                                 )}
                             </div>
@@ -590,122 +741,7 @@ export function AssessmentSetupScreen({
                     {/* Manual Entry Mode */}
                     {customMode === 'manual' && (
                         <div className="space-y-4">
-                            {manualQuestions.map((q, qi) => (
-                                <div key={qi} className="glass-card p-4 space-y-3">
-                                    <div className="flex items-center justify-between flex-wrap gap-2">
-                                        <div className="flex items-center gap-2">
-                                            <h3 className="font-semibold text-sm text-primary-300">Question {qi + 1}</h3>
-                                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${TYPE_META[q.type].badge}`}>
-                                                {TYPE_META[q.type].label}
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <label className="text-xs text-white/40">Marks:</label>
-                                            <input
-                                                type="number"
-                                                min={1}
-                                                max={20}
-                                                value={q.marks}
-                                                onChange={(e) => updateManualQuestion(qi, 'marks', parseInt(e.target.value) || 1)}
-                                                className="text-input !w-16 !py-1 text-center text-sm"
-                                            />
-                                            {manualQuestions.length > 1 && (
-                                                <button
-                                                    onClick={() => removeManualQuestion(qi)}
-                                                    className="text-red-400 hover:text-red-300 text-sm px-2"
-                                                >
-                                                    ✕
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <input
-                                        type="text"
-                                        placeholder="Enter question text..."
-                                        value={q.question}
-                                        onChange={(e) => updateManualQuestion(qi, 'question', e.target.value)}
-                                        className="text-input text-sm"
-                                    />
-
-                                    {q.type === 'mcq' ? (
-                                        <>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {['A', 'B', 'C', 'D'].map((letter, oi) => (
-                                                    <input
-                                                        key={letter}
-                                                        type="text"
-                                                        placeholder={`${letter}) Option...`}
-                                                        value={q.options[oi]}
-                                                        onChange={(e) => updateManualOption(qi, oi, e.target.value)}
-                                                        className="text-input text-sm"
-                                                    />
-                                                ))}
-                                            </div>
-
-                                            <div className="flex items-center gap-3">
-                                                <label className="text-xs text-white/40">Correct Answer:</label>
-                                                <div className="flex gap-2">
-                                                    {['A', 'B', 'C', 'D'].map((letter) => (
-                                                        <button
-                                                            key={letter}
-                                                            onClick={() => updateManualQuestion(qi, 'correctAnswer', letter)}
-                                                            className={`w-8 h-8 rounded-lg text-sm font-bold transition-all ${
-                                                                q.correctAnswer === letter
-                                                                    ? 'bg-green-500 text-white shadow-lg'
-                                                                    : 'bg-white/10 text-white/50 hover:bg-white/20'
-                                                            }`}
-                                                        >
-                                                            {letter}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            <label className="text-xs text-white/40">Model answer key points (used for AI grading)</label>
-                                            {(q.keyPoints || ['']).map((kp, ki) => (
-                                                <input
-                                                    key={ki}
-                                                    type="text"
-                                                    placeholder={`Key point ${ki + 1}...`}
-                                                    value={kp}
-                                                    onChange={(e) => updateKeyPoint(qi, ki, e.target.value)}
-                                                    className="text-input text-sm"
-                                                />
-                                            ))}
-                                            <button
-                                                onClick={() => updateManualQuestion(qi, 'keyPoints', [...(q.keyPoints || []), ''])}
-                                                className="text-xs text-primary-300 hover:text-primary-200"
-                                            >
-                                                + Add key point
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-
-                            <div className="flex gap-2 flex-wrap">
-                                <button
-                                    onClick={() => addManualQuestion('mcq')}
-                                    className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
-                                >
-                                    + Add MCQ
-                                </button>
-                                <button
-                                    onClick={() => addManualQuestion('short')}
-                                    className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
-                                >
-                                    + Add Short Question
-                                </button>
-                                <button
-                                    onClick={() => addManualQuestion('long')}
-                                    className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20"
-                                >
-                                    + Add Long Question
-                                </button>
-                            </div>
+                            <ManualQuestionsEditor questions={manualQuestions} onChange={setManualQuestions} />
 
                             <div className="glass-card p-4 flex items-center justify-between flex-wrap gap-2">
                                 <div className="text-sm text-white/60">
@@ -782,8 +818,8 @@ export function AssessmentSetupScreen({
                             ) : (
                                 <div className="space-y-1">
                                     <div className="text-3xl">📤</div>
-                                    <p className="text-white/70 font-medium text-sm">Upload one or more study files (PDF, PPTX, DOCX)</p>
-                                    <p className="text-white/40 text-xs">Select multiple, or paste text below</p>
+                                    <p className="text-white/70 font-medium text-sm">Upload study files (PDF, PPTX, DOCX)</p>
+                                    <p className="text-white/40 text-xs">Up to 7 files, or paste text below</p>
                                 </div>
                             )}
                         </div>
@@ -805,69 +841,72 @@ export function AssessmentSetupScreen({
                     <div className="glass-card p-5 space-y-5">
                         <h3 className="font-semibold">⚙️ Exam Configuration</h3>
 
-                        {/* MCQ Count */}
+                        <p className="text-xs text-white/40 -mt-2">Set how many of each type to AI-generate, and the marks each is worth (defaults shown — change any).</p>
+
+                        {/* MCQ Count + marks */}
                         <div className="space-y-2">
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between gap-2">
                                 <label className="text-sm text-white/70">Multiple-Choice Questions (MCQ)</label>
-                                <span className="text-lg font-bold text-sky-300">{mcqCount}</span>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-1">
+                                        <input type="number" min={1} max={20} value={mcqMarks}
+                                            onChange={(e) => setMcqMarks(Math.max(1, parseInt(e.target.value) || 1))}
+                                            className="text-input !w-14 !py-1 text-center text-xs" />
+                                        <span className="text-[10px] text-white/40">m each</span>
+                                    </div>
+                                    <span className="text-lg font-bold text-sky-300 w-6 text-right">{mcqCount}</span>
+                                </div>
                             </div>
-                            <input
-                                type="range"
-                                min={0}
-                                max={MAX_TOTAL_QUESTIONS}
-                                value={mcqCount}
-                                onChange={(e) => setMcqCount(parseInt(e.target.value))}
-                                className="w-full accent-primary-500"
-                            />
-                            <div className="flex justify-between text-xs text-white/30">
-                                <span>0</span><span>{MAX_TOTAL_QUESTIONS}</span>
-                            </div>
+                            <input type="range" min={0} max={MAX_TOTAL_QUESTIONS} value={mcqCount}
+                                onChange={(e) => setMcqCount(parseInt(e.target.value))} className="w-full accent-primary-500" />
+                            <div className="flex justify-between text-xs text-white/30"><span>0</span><span>{MAX_TOTAL_QUESTIONS}</span></div>
                         </div>
 
-                        {/* Short-Answer Count */}
+                        {/* Short-Answer Count + marks */}
                         <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <label className="text-sm text-white/70">Short-Answer Questions <span className="text-white/30">({MARKS_PER_SHORT}m each)</span></label>
-                                <span className="text-lg font-bold text-fuchsia-300">{shortCount}</span>
+                            <div className="flex items-center justify-between gap-2">
+                                <label className="text-sm text-white/70">Short-Answer Questions</label>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-1">
+                                        <input type="number" min={1} max={20} value={shortMarks}
+                                            onChange={(e) => setShortMarks(Math.max(1, parseInt(e.target.value) || 1))}
+                                            className="text-input !w-14 !py-1 text-center text-xs" />
+                                        <span className="text-[10px] text-white/40">m each</span>
+                                    </div>
+                                    <span className="text-lg font-bold text-fuchsia-300 w-6 text-right">{shortCount}</span>
+                                </div>
                             </div>
-                            <input
-                                type="range"
-                                min={0}
-                                max={20}
-                                value={shortCount}
-                                onChange={(e) => setShortCount(parseInt(e.target.value))}
-                                className="w-full accent-fuchsia-500"
-                            />
-                            <div className="flex justify-between text-xs text-white/30">
-                                <span>0</span><span>20</span>
-                            </div>
+                            <input type="range" min={0} max={20} value={shortCount}
+                                onChange={(e) => setShortCount(parseInt(e.target.value))} className="w-full accent-fuchsia-500" />
+                            <div className="flex justify-between text-xs text-white/30"><span>0</span><span>20</span></div>
                         </div>
 
-                        {/* Long-Answer Count */}
+                        {/* Long-Answer Count + marks */}
                         <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <label className="text-sm text-white/70">Long-Answer / Essay Questions <span className="text-white/30">({MARKS_PER_LONG}m each)</span></label>
-                                <span className="text-lg font-bold text-amber-300">{longCount}</span>
+                            <div className="flex items-center justify-between gap-2">
+                                <label className="text-sm text-white/70">Long-Answer / Essay Questions</label>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-1">
+                                        <input type="number" min={1} max={20} value={longMarks}
+                                            onChange={(e) => setLongMarks(Math.max(1, parseInt(e.target.value) || 1))}
+                                            className="text-input !w-14 !py-1 text-center text-xs" />
+                                        <span className="text-[10px] text-white/40">m each</span>
+                                    </div>
+                                    <span className="text-lg font-bold text-amber-300 w-6 text-right">{longCount}</span>
+                                </div>
                             </div>
-                            <input
-                                type="range"
-                                min={0}
-                                max={15}
-                                value={longCount}
-                                onChange={(e) => setLongCount(parseInt(e.target.value))}
-                                className="w-full accent-amber-500"
-                            />
-                            <div className="flex justify-between text-xs text-white/30">
-                                <span>0</span><span>15</span>
-                            </div>
+                            <input type="range" min={0} max={15} value={longCount}
+                                onChange={(e) => setLongCount(parseInt(e.target.value))} className="w-full accent-amber-500" />
+                            <div className="flex justify-between text-xs text-white/30"><span>0</span><span>15</span></div>
                         </div>
 
                         {/* Totals summary */}
                         <div className={`flex items-center gap-3 text-sm rounded-xl p-3 flex-wrap ${genOverLimit ? 'bg-red-500/10 text-red-300 border border-red-500/20' : 'bg-white/5 text-white/60'}`}>
-                            <span><span className="font-semibold text-white">{genTotalCount}</span> / {MAX_TOTAL_QUESTIONS} questions</span>
+                            <span><span className="font-semibold text-white">{genTotalCount}</span> questions</span>
                             <span className="text-white/20">|</span>
                             <span><span className="font-semibold text-white">{genTotalMarks}</span> total marks</span>
-                            {genOverLimit && <span className="w-full text-xs">⚠️ Max {MAX_TOTAL_QUESTIONS} questions total — reduce one of the counts.</span>}
+                            {bonusValid.length > 0 && <span className="text-[11px] text-white/40">(incl. {bonusValid.length} of your own)</span>}
+                            {genOverLimit && <span className="w-full text-xs">⚠️ Max {MAX_TOTAL_QUESTIONS} AI questions — reduce a count.</span>}
                         </div>
 
                         {/* Difficulty */}
@@ -897,6 +936,21 @@ export function AssessmentSetupScreen({
                         </div>
                     </div>
 
+                    {/* Add your own questions (hybrid) */}
+                    <div className="glass-card p-5 space-y-3">
+                        <div>
+                            <h3 className="font-semibold">✍️ Add Your Own Questions <span className="text-white/40 text-sm font-normal">(optional)</span></h3>
+                            <p className="text-xs text-white/40 mt-1">
+                                Mix in your favourite questions. They're merged with the AI ones, use the marks set above, and are ordered MCQ → short → long.
+                            </p>
+                        </div>
+                        <ManualQuestionsEditor
+                            questions={bonusQuestions}
+                            onChange={setBonusQuestions}
+                            perTypeMarks={{ mcq: mcqMarks, short: shortMarks, long: longMarks }}
+                        />
+                    </div>
+
                     {generateError && (
                         <div className="glass-card p-4 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl space-y-2 text-sm">
                             <div className="flex items-center gap-2 font-bold text-amber-300">
@@ -909,13 +963,13 @@ export function AssessmentSetupScreen({
                     {/* Generate Button */}
                     <button
                         onClick={handleGenerateExam}
-                        disabled={isGenerating || materialText.trim().length < 20 || genTotalCount < 1 || genOverLimit}
+                        disabled={isGenerating || genTotalCount < 1 || genOverLimit}
                         className="btn-primary w-full !py-4 text-lg disabled:opacity-50"
                     >
                         {isGenerating ? (
                             <><span className="animate-spin">🤖</span> AI is generating your exam...</>
                         ) : (
-                            <>🚀 Generate {genTotalCount}-Question Exam</>
+                            <>🚀 {sessionAuthor ? 'Create' : 'Generate'} {genTotalCount}-Question Exam</>
                         )}
                     </button>
                 </div>

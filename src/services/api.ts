@@ -349,7 +349,10 @@ export async function generateExam(config: {
     mcqCount: number;
     shortCount: number;
     longCount: number;
-    totalMarks: number;
+    mcqMarks?: number;
+    shortMarks?: number;
+    longMarks?: number;
+    manualQuestions?: any[];
     difficulty: string;
 }): Promise<{ success: boolean; exam?: any; error?: string }> {
     return safeApiJson(`${API_BASE}/generate-exam`, {
