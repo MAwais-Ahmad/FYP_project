@@ -36,6 +36,10 @@ export interface Question {
     min?: number;
     max?: number;
     unit?: string;
+    // Answer-key & Question Bank fields
+    correctAnswer?: string;
+    accept?: string[];
+    category?: string;
 }
 
 export interface QuestionMetrics {
