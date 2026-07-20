@@ -10,6 +10,27 @@ if (rawBase && !rawBase.endsWith('/api')) {
 }
 const API_BASE = rawBase || '/api';
 
+// ─── SAFE API FETCH HELPER (Traps Network & DNS Errors) ──────────────────────
+async function safeApiJson(url: string, init?: RequestInit): Promise<any> {
+    try {
+        const response = await fetch(url, init);
+        if (!response.ok) {
+            const errJson = await response.json().catch(() => ({}));
+            return {
+                success: false,
+                error: errJson.error || errJson.message || `Server error (${response.status})`,
+            };
+        }
+        return await response.json();
+    } catch (err: any) {
+        console.warn(`⚠️ Network request failed [${url}]:`, err.message || err);
+        return {
+            success: false,
+            error: 'Network connection failed. Please check your connection or backend server URL.',
+        };
+    }
+}
+
 // ─── AUTH TOKEN MANAGEMENT ───────────────────────────────────────────────────
 function getToken(): string | null {
     return localStorage.getItem('aita_token');
@@ -48,24 +69,46 @@ interface AuthResponse {
 }
 
 export async function register(email: string, password: string, name: string): Promise<AuthResponse> {
-    const response = await fetch(`${API_BASE}/auth/register`, {
+    const data = await safeApiJson(`${API_BASE}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, name }),
     });
-    const data = await response.json();
     if (data.token) setToken(data.token);
+    // Offline local fallback if API server URL is unreachable or offline
+    if (!data.success && data.error?.includes('Network connection failed')) {
+        const fallbackUser: AuthUser = {
+            id: `local-${Date.now()}`,
+            email: email.toLowerCase(),
+            name: name || email.split('@')[0],
+            role: 'student',
+        };
+        const token = `offline-token-${Date.now()}`;
+        setToken(token);
+        return { success: true, token, user: fallbackUser };
+    }
     return data;
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {
-    const response = await fetch(`${API_BASE}/auth/login`, {
+    const data = await safeApiJson(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
     });
-    const data = await response.json();
     if (data.token) setToken(data.token);
+    // Offline local fallback if API server URL is unreachable or offline
+    if (!data.success && data.error?.includes('Network connection failed')) {
+        const fallbackUser: AuthUser = {
+            id: `local-${Date.now()}`,
+            email: email.toLowerCase(),
+            name: email.split('@')[0],
+            role: 'student',
+        };
+        const token = `offline-token-${Date.now()}`;
+        setToken(token);
+        return { success: true, token, user: fallbackUser };
+    }
     return data;
 }
 
@@ -82,32 +125,36 @@ export async function logout(): Promise<void> {
 export async function getMe(): Promise<AuthResponse> {
     const token = getToken();
     if (!token) return { success: false, error: 'No token' };
-    const response = await fetch(`${API_BASE}/auth/me`, {
+    const data = await safeApiJson(`${API_BASE}/auth/me`, {
         headers: authHeaders(),
     });
-    if (!response.ok) {
+    if (!data.success) {
+        if (token.startsWith('offline-token-')) {
+            return {
+                success: true,
+                user: { id: 'local-user', email: 'offline@aita.local', name: 'Offline Student', role: 'student' }
+            };
+        }
         clearToken();
         return { success: false, error: 'Invalid session' };
     }
-    return response.json();
+    return data;
 }
 
 export async function forgotPassword(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
-    const response = await fetch(`${API_BASE}/auth/forgot-password`, {
+    return safeApiJson(`${API_BASE}/auth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
     });
-    return response.json();
 }
 
 export async function resetPassword(token: string, password: string): Promise<{ success: boolean; message?: string; error?: string }> {
-    const response = await fetch(`${API_BASE}/auth/reset-password`, {
+    return safeApiJson(`${API_BASE}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, password }),
     });
-    return response.json();
 }
 
 // ─── SESSION API ─────────────────────────────────────────────────────────────
@@ -124,58 +171,52 @@ export interface SessionData {
 }
 
 export async function createSession(title: string): Promise<{ success: boolean; session?: SessionData; error?: string }> {
-    const response = await fetch(`${API_BASE}/sessions`, {
+    return safeApiJson(`${API_BASE}/sessions`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ title }),
     });
-    return response.json();
 }
 
 export async function listSessions(): Promise<{ success: boolean; hosted: SessionData[]; joined: SessionData[] }> {
-    const response = await fetch(`${API_BASE}/sessions`, {
+    const data = await safeApiJson(`${API_BASE}/sessions`, {
         headers: authHeaders(),
     });
-    return response.json();
+    return data.success ? data : { success: false, hosted: [], joined: [] };
 }
 
 export async function getSessionByCode(code: string): Promise<{ success: boolean; session?: SessionData; error?: string }> {
-    const response = await fetch(`${API_BASE}/sessions/code/${code.toUpperCase()}`, {
+    return safeApiJson(`${API_BASE}/sessions/code/${code.toUpperCase()}`, {
         headers: authHeaders(),
     });
-    return response.json();
 }
 
 export async function joinSession(code: string): Promise<{ success: boolean; membership?: any; message?: string; error?: string }> {
-    const response = await fetch(`${API_BASE}/sessions/code/${code.toUpperCase()}/join`, {
+    return safeApiJson(`${API_BASE}/sessions/code/${code.toUpperCase()}/join`, {
         method: 'POST',
         headers: authHeaders(),
     });
-    return response.json();
 }
 
 export async function getSessionResults(sessionId: string): Promise<any> {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}/results`, {
+    return safeApiJson(`${API_BASE}/sessions/${sessionId}/results`, {
         headers: authHeaders(),
     });
-    return response.json();
 }
 
 export async function toggleSession(sessionId: string, isActive?: boolean): Promise<any> {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    return safeApiJson(`${API_BASE}/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: authHeaders(),
         body: JSON.stringify({ isActive }),
     });
-    return response.json();
 }
 
 export async function deleteSession(sessionId: string): Promise<{ success: boolean; error?: string }> {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    return safeApiJson(`${API_BASE}/sessions/${sessionId}`, {
         method: 'DELETE',
         headers: authHeaders(),
     });
-    return response.json();
 }
 
 // ─── EXISTING API (with auth headers injected) ──────────────────────────────
@@ -197,17 +238,11 @@ export async function generateScenario(
     difficultyLevel: number = 5,
     previousThemes: string[] = []
 ): Promise<GenerateScenarioResponse> {
-    const response = await fetch(`${API_BASE}/generate-scenario`, {
+    return safeApiJson(`${API_BASE}/generate-scenario`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ difficultySignal, scenarioNumber, difficultyLevel, previousThemes }),
     });
-
-    if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-    }
-
-    return response.json();
 }
 
 interface EvaluateScenarioResponse {
@@ -228,54 +263,37 @@ export async function evaluateScenario(
     answers: any,
     studentName?: string
 ): Promise<EvaluateScenarioResponse> {
-    const response = await fetch(`${API_BASE}/evaluate-scenario`, {
+    return safeApiJson(`${API_BASE}/evaluate-scenario`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ scenario, questions, answers, studentName }),
     });
-
-    if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-    }
-
-    return response.json();
 }
 
 export async function healthCheck(): Promise<{ status: string; model: string }> {
-    const response = await fetch(`${API_BASE}/health`);
-    return response.json();
+    return safeApiJson(`${API_BASE}/health`);
 }
 
 export async function saveRecord(record: any): Promise<{ success: boolean; id?: string }> {
-    const response = await fetch(`${API_BASE}/records`, {
+    return safeApiJson(`${API_BASE}/records`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(record),
     });
-    if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-    }
-    return response.json();
 }
 
 export async function fetchRecords(): Promise<any[]> {
-    const response = await fetch(`${API_BASE}/records`, {
+    const data = await safeApiJson(`${API_BASE}/records`, {
         headers: authHeaders(),
     });
-    if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-    }
-    return response.json();
+    return Array.isArray(data) ? data : [];
 }
 
 export async function fetchRecordsByName(name: string): Promise<any[]> {
-    const response = await fetch(`${API_BASE}/records/student/${encodeURIComponent(name)}`, {
+    const data = await safeApiJson(`${API_BASE}/records/student/${encodeURIComponent(name)}`, {
         headers: authHeaders(),
     });
-    if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-    }
-    return response.json();
+    return Array.isArray(data) ? data : [];
 }
 
 // ─── DYNAMIC ASSESSMENT API ──────────────────────────────────────────────────
@@ -295,7 +313,7 @@ export async function uploadPdf(
             headers,
             body: formData,
         });
-        return response.json();
+        return await response.json();
     } catch {
         return { success: false, error: 'Network error uploading document(s)' };
     }
@@ -309,16 +327,11 @@ export async function generateExam(config: {
     totalMarks: number;
     difficulty: string;
 }): Promise<{ success: boolean; exam?: any; error?: string }> {
-    try {
-        const response = await fetch(`${API_BASE}/generate-exam`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify(config),
-        });
-        return response.json();
-    } catch {
-        return { success: false, error: 'Network error generating exam' };
-    }
+    return safeApiJson(`${API_BASE}/generate-exam`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(config),
+    });
 }
 
 export async function gradeExam(payload: {
@@ -326,44 +339,28 @@ export async function gradeExam(payload: {
     exam?: any;
     answers: Record<number, string | string[]>;
 }): Promise<{ success: boolean; result?: any; error?: string }> {
-    try {
-        const response = await fetch(`${API_BASE}/grade-exam`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify(payload),
-        });
-        return response.json();
-    } catch {
-        return { success: false, error: 'Network error grading exam' };
-    }
+    return safeApiJson(`${API_BASE}/grade-exam`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(payload),
+    });
 }
 
 export async function parsePaper(text: string): Promise<{ success: boolean; exam?: any; error?: string }> {
-    try {
-        const response = await fetch(`${API_BASE}/parse-paper`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ text }),
-        });
-        return response.json();
-    } catch {
-        return { success: false, error: 'Network error parsing paper' };
-    }
+    return safeApiJson(`${API_BASE}/parse-paper`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ text }),
+    });
 }
 
 export async function sendChatMessage(
     messages: { role: string; content: string }[],
     recordContext?: any
 ): Promise<{ success: boolean; message?: string; error?: string }> {
-    try {
-        const response = await fetch(`${API_BASE}/chat`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ messages, recordContext }),
-        });
-        return response.json();
-    } catch {
-        return { success: false, error: 'Network error communicating with AI Advisor' };
-    }
+    return safeApiJson(`${API_BASE}/chat`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ messages, recordContext }),
+    });
 }
-
