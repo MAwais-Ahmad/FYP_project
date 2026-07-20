@@ -30,6 +30,8 @@ export interface StudentRecord {
     performanceScore: number; // latest round 0–1
     avgPerformanceScore: number; // averaged across rounds 0–1
     accuracyScore: number; // latest round 0–1
+    obtainedMarks?: number;
+    totalMarks?: number;
     avgResponseTime: number;
     decisionStyle: string;
     cognitive: CognitiveFeatures;
@@ -126,6 +128,8 @@ export function buildCustomRecord(
     accuracyScore: number,
     confidence: number,
     customScenarioResults?: ScenarioResult[],
+    obtainedMarks?: number,
+    totalMarks?: number,
 ): StudentRecord {
     return {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -142,6 +146,8 @@ export function buildCustomRecord(
         performanceScore: accuracyScore,
         avgPerformanceScore: accuracyScore,
         accuracyScore,
+        obtainedMarks,
+        totalMarks,
         avgResponseTime: overall.avgResponseTime,
         decisionStyle: overall.decisionStyle,
         cognitive,

@@ -155,6 +155,8 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
             accuracyScore,
             confidence,
             customScenarioResults,
+            obtainedMarks,
+            totalMarks,
         );
         addRecord(record);
         saveRecord(sessionId ? { ...record, sessionId } : record).catch(err => {
