@@ -106,6 +106,47 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
     useEffect(() => {
         if (savedRef.current) return;
         savedRef.current = true;
+
+        const itemizedDetails = (questions || []).map((q: any) => {
+            const given = selectedAnswers[q.id];
+            const isMcq = q.type === 'mcq';
+            const correctStr = isMcq ? q.correctAnswer : Array.isArray(q.keyPoints) ? q.keyPoints.join(', ') : '';
+            return {
+                id: q.id,
+                q: q.question,
+                type: q.type,
+                marks: q.marks,
+                ans: given != null ? (Array.isArray(given) ? given.join(' | ') : String(given)) : '[No Answer]',
+                correct: correctStr || undefined,
+                isCorrect: isMcq && given ? String(given).trim().toUpperCase() === String(q.correctAnswer).trim().toUpperCase() : undefined,
+                time: (questionTimes && questionTimes[q.id]) || 0,
+            };
+        });
+
+        const customScenarioResults: any[] = [{
+            scenarioNumber: 1,
+            scenarioTitle: examTitle || 'Custom Exam',
+            difficultyLevel: 5,
+            avgResponseTime: meanTime,
+            totalAnswerChanges: totalRevisions,
+            backtrackCount: 0,
+            rushedDecisions: rushedCount,
+            overthinkingCount: overthinkingVal,
+            timeVariance: varianceVal.toFixed(2),
+            confidence,
+            decisionStyle: overallMetrics.decisionStyle,
+            performanceScore: accuracyScore,
+            accuracyScore,
+            cognitive,
+            avgTimeToStart: 2.5,
+            totalResponseLength: 0,
+            skippedQuestions: skippedCount,
+            overtimeCount: overtimeVal,
+            answers: selectedAnswers as any,
+            questions: questions || [],
+            itemizedDetails,
+        }];
+
         const record = buildCustomRecord(
             studentName || 'Anonymous',
             categoryResult,
@@ -113,6 +154,7 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
             overallMetrics,
             accuracyScore,
             confidence,
+            customScenarioResults,
         );
         addRecord(record);
         saveRecord(sessionId ? { ...record, sessionId } : record).catch(err => {

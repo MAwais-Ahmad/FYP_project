@@ -199,6 +199,18 @@ export function useQuizState() {
                     answers: { ...answers },
                     questions: [...questions],
                     questionsMetrics: qMetrics ? { ...qMetrics } : undefined,
+                    itemizedDetails: questions.map(q => {
+                        const given = answers[q.id];
+                        return {
+                            id: q.id,
+                            q: q.question,
+                            type: q.type,
+                            ans: given != null ? (Array.isArray(given) ? given.join(' | ') : String(given)) : '[No Answer]',
+                            correct: q.correctAnswer || undefined,
+                            time: qMetrics?.[q.id]?.totalTimeSpent || 0,
+                            revisions: qMetrics?.[q.id]?.answerChanges || 0,
+                        };
+                    }),
                 };
 
                 setScenarioResults(prev => [...prev, result]);

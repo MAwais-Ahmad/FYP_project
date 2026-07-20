@@ -1879,6 +1879,21 @@ app.post('/api/chat', async (req, res) => {
 
     let formattedActiveContext = '';
     if (recordContext) {
+      // Extract compact itemized question-by-question diagnostic log
+      let itemizedSummary = '';
+      const scenarioList = recordContext.scenarioResults || recordContext.scenario_results || [];
+      if (Array.isArray(scenarioList) && scenarioList.length > 0) {
+        const allItemized = scenarioList.flatMap(s => s.itemizedDetails || s.itemized_details || []);
+        if (allItemized.length > 0) {
+          itemizedSummary = '\n- Itemized Question Responses:\n' + allItemized.map(item => {
+            let statusStr = item.isCorrect === true ? '✅ Correct' : item.isCorrect === false ? '❌ Incorrect' : '📝 Answered';
+            let correctStr = item.correct ? ` (Expected: "${item.correct}")` : '';
+            let timeStr = item.time ? ` [Time: ${item.time}s]` : '';
+            return `  * Q${item.id} (${item.type}): "${(item.q || '').slice(0, 70)}" -> Given: "${item.ans}" | ${statusStr}${correctStr}${timeStr}`;
+          }).join('\n');
+        }
+      }
+
       formattedActiveContext = `
 
 ACTIVE ASSESSMENT CONTEXT:
@@ -1890,7 +1905,7 @@ ACTIVE ASSESSMENT CONTEXT:
 - Decision Style: ${recordContext.decisionStyle || recordContext.overall?.decisionStyle || 'N/A'}
 - Answer Changes / Revisions: ${recordContext.totalAnswerChanges ?? recordContext.overall?.totalAnswerChanges ?? 0}
 - Backtrack Count: ${recordContext.backtrackCount ?? recordContext.overall?.backtrackCount ?? 0}
-- Behavioral Confidence: ${recordContext.confidence !== undefined ? recordContext.confidence + '/10' : 'N/A'}`;
+- Behavioral Confidence: ${recordContext.confidence !== undefined ? recordContext.confidence + '/10' : 'N/A'}${itemizedSummary}`;
     }
 
     const systemPrompt = `You are AITA Core AI — the premier Intelligent Academic & Diagnostic Assistant for the AITA Platform (Adaptive Diagnostic & Cognitive Profiler).

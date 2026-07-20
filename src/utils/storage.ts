@@ -125,6 +125,7 @@ export function buildCustomRecord(
     overall: OverallMetrics,
     accuracyScore: number,
     confidence: number,
+    customScenarioResults?: ScenarioResult[],
 ): StudentRecord {
     return {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -145,6 +146,6 @@ export function buildCustomRecord(
         decisionStyle: overall.decisionStyle,
         cognitive,
         overall,
-        scenarioResults: [],
+        scenarioResults: customScenarioResults || [],
     };
 }

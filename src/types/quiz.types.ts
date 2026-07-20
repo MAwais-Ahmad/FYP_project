@@ -117,6 +117,18 @@ export type LearnerCategoryId =
     | 'strategic_thinker'
     | 'ignorant_avoider';
 
+export interface ItemizedDetail {
+    id: number;
+    q: string;
+    type: string;
+    marks?: number;
+    ans: string;
+    correct?: string;
+    isCorrect?: boolean;
+    time?: number;
+    revisions?: number;
+}
+
 export interface ScenarioResult {
     scenarioNumber: number;
     scenarioTitle: string;
@@ -138,6 +150,7 @@ export interface ScenarioResult {
     overtimeCount: number;
     answers: Answers;
     questions?: Question[];
+    itemizedDetails?: ItemizedDetail[];
     questionsMetrics?: Record<
         number,
         {
