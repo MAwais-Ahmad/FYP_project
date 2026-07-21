@@ -11,10 +11,12 @@ import {
     AssessmentSetupScreen,
     CustomQuizScreen,
     CustomResultsScreen,
+    GeneralQuizScreen,
+    GeneralResultsScreen,
 } from './components';
 import { AIChatDrawer } from './components/ui/AIChatDrawer';
 import { CustomExamResults } from './components/screens/CustomQuizScreen';
-import { useQuizState, useMetrics } from './hooks';
+import { useQuizState, useGeneralQuiz, useMetrics } from './hooks';
 import { AuthUser, getMe, logout as apiLogout, setSessionAssessment, getSessionAssessment, generateScenario } from './services/api';
 import { StudentRecord } from './utils/storage';
 import { GeneratedExam } from './types/quiz.types';
@@ -60,6 +62,23 @@ function App() {
         restartQuiz,
         goToWelcome,
     } = useQuizState();
+
+    // General aptitude quiz (self-contained, sits alongside the scenario flow)
+    const {
+        gScenario,
+        gQuestions,
+        gCurrentIndex,
+        gAnswers,
+        gResult,
+        gStudentName,
+        startGeneralQuiz,
+        completeGeneralQuiz,
+        setGeneralAnswer,
+        gNext,
+        gPrev,
+        gJumpTo,
+        resetGeneral,
+    } = useGeneralQuiz();
 
     const {
         metrics,
@@ -133,7 +152,39 @@ function App() {
         setSelectedRecord(null);
         setCustomExam(null);
         setCustomExamResults(null);
-        goToWelcome();
+        resetGeneral();
+        setScreen('auth');
+    };
+
+    // ── GENERAL APTITUDE QUIZ (self-contained flow) ───────────────────────────
+    const handleStartGeneralQuiz = () => {
+        resetMetrics();
+        startMetrics();
+        startGeneralQuiz(currentUser?.name || 'Anonymous');
+        setScreen('general-quiz');
+    };
+
+    const handleGeneralAnswer = (questionId: number, answer: string | string[]) => {
+        setGeneralAnswer(questionId, answer);
+        let textVal = '';
+        if (Array.isArray(answer)) {
+            textVal = answer.join('');
+        } else if (typeof answer === 'string') {
+            textVal = answer.includes('|') ? (answer.split('|')[1] || '') : answer;
+        }
+        recordFinalAnswer(questionId, answer, textVal.length);
+    };
+
+    const handleCompleteGeneralQuiz = () => {
+        const overall = calculateOverallMetrics();
+        completeGeneralQuiz(overall, questionsMetrics);
+        setScreen('general-results');
+    };
+
+    const handleGeneralRestart = () => {
+        resetMetrics();
+        resetGeneral();
+        setScreen(currentUser ? 'user-dashboard' : 'welcome');
     };
 
 
@@ -392,6 +443,7 @@ function App() {
                 <AssessmentSetupScreen
                     onStartAIScenario={handleStartAIScenario}
                     onStartCustomExam={handleStartCustomExam}
+                    onStartGeneralQuiz={handleStartGeneralQuiz}
                     sessionAuthor={authoringSession}
                     onAuthorCustomExam={handleAuthorCustomExam}
                     onAuthorScenario={handleAuthorScenario}
@@ -514,6 +566,43 @@ function App() {
                 />
             )}
 
+            {/* General Aptitude Quiz Screen (self-contained flow) */}
+            {screen === 'general-quiz' && gScenario && (
+                <GeneralQuizScreen
+                    scenario={gScenario}
+                    questions={gQuestions}
+                    currentQuestionIndex={gCurrentIndex}
+                    answers={gAnswers}
+                    onAnswer={handleGeneralAnswer}
+                    onNext={gNext}
+                    onPrevious={gPrev}
+                    onJumpToQuestion={gJumpTo}
+                    onCompleteScenario={handleCompleteGeneralQuiz}
+                    onFirstInteraction={recordFirstInteraction}
+                    onAnswerChange={recordAnswerChange}
+                    onQuestionStart={recordQuestionStart}
+                    onQuestionEnd={recordQuestionEnd}
+                    onBacktrack={recordBacktrack}
+                />
+            )}
+
+            {/* General Aptitude Results Screen */}
+            {screen === 'general-results' && gResult && (
+                <GeneralResultsScreen
+                    questions={gQuestions}
+                    calculateMetrics={calculateOverallMetrics}
+                    questionsMetrics={questionsMetrics}
+                    scenarioResults={[gResult]}
+                    studentName={gStudentName || currentUser?.name || ''}
+                    tokensUsed={0}
+                    totalCost={0}
+                    onRestart={handleGeneralRestart}
+                    onViewDashboard={
+                        currentUser ? () => setScreen('user-dashboard') : undefined
+                    }
+                />
+            )}
+
             {/* Custom Exam Quiz Screen */}
             {screen === 'custom-quiz' && customExam && (
                 <CustomQuizScreen
@@ -540,9 +629,9 @@ function App() {
             )}
 
             {/* Global AI Diagnostic Tutor Chatbot (Only available before & after assessment, hidden during active test session) */}
-            {screen !== 'quiz' && (screen as string) !== 'custom-quiz' && (
+            {screen !== 'quiz' && (screen as string) !== 'custom-quiz' && screen !== 'general-quiz' && (
                 <AIChatDrawer
-                    recordContext={selectedRecord || customExamResults || (scenarioResults.length > 0 ? scenarioResults[scenarioResults.length - 1] : null)}
+                    recordContext={selectedRecord || customExamResults || gResult || (scenarioResults.length > 0 ? scenarioResults[scenarioResults.length - 1] : null)}
                 />
             )}
         </div>

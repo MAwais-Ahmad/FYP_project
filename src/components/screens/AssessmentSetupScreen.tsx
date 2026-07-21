@@ -6,6 +6,7 @@ import { appendCognitiveProbes } from '../../utils/cognitiveProbes';
 interface AssessmentSetupScreenProps {
     onStartAIScenario: () => void;
     onStartCustomExam: (exam: GeneratedExam) => void;
+    onStartGeneralQuiz?: () => void;
     onBack: () => void;
     userName?: string;
     // Session-authoring mode: the host is creating the paper for a session rather
@@ -189,6 +190,7 @@ function ManualQuestionsEditor({
 export function AssessmentSetupScreen({
     onStartAIScenario,
     onStartCustomExam,
+    onStartGeneralQuiz,
     onBack,
     userName,
     sessionAuthor = false,
@@ -600,6 +602,27 @@ export function AssessmentSetupScreen({
                     </div>
 
                     <div className="grid gap-4">
+                        {/* General Aptitude Test (solo only) */}
+                        {!sessionAuthor && onStartGeneralQuiz && (
+                            <button
+                                onClick={onStartGeneralQuiz}
+                                className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-emerald-500/30"
+                            >
+                                <div className="flex items-start gap-4">
+                                    <div className="text-4xl group-hover:scale-110 transition-transform">🧩</div>
+                                    <div className="space-y-1">
+                                        <h3 className="font-bold text-xl">General Aptitude Test</h3>
+                                        <p className="text-white/50 text-sm leading-relaxed">
+                                            A quick 12-question mix of problem-solving &amp; reflection, general knowledge, logical, verbal and visual diagram puzzles. Randomly generated so every attempt differs — instant marks + cognitive profile.
+                                        </p>
+                                        <span className="inline-block text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full mt-1">
+                                            12 Questions · Auto-Graded
+                                        </span>
+                                    </div>
+                                </div>
+                            </button>
+                        )}
+
                         {/* General AI Scenario */}
                         <button
                             onClick={() => {

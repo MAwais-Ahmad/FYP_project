@@ -5,15 +5,20 @@
 // so each attempt gets a different mix.
 
 import { Question, Scenario } from '../types/quiz.types';
+import { COMPASS_SVG, FIG, figureSeriesSvg, questionKey } from './svgFigures';
+import { generateQuestions } from './questionGenerators';
 
-export type BankCategory = 'math' | 'verbal' | 'logical' | 'gk' | 'visual';
+export type BankCategory = 'math' | 'verbal' | 'logical' | 'gk' | 'visual' | 'psych';
 
-interface BankQuestion {
+export interface BankQuestion {
     category: BankCategory;
-    type: 'mcq' | 'text';
+    type: 'mcq' | 'text' | 'multi-text';
     question: string;
     options?: string[];
-    correctAnswer: string; // MCQ: letter "A".."E" | text: canonical answer
+    // MCQ: letter "A".."E" | text: canonical answer.
+    // Open-ended (psych) questions have NO correctAnswer — they earn their
+    // mark through a meaningful attempt and feed the cognitive analysis.
+    correctAnswer?: string;
     accept?: string[]; // text only: other accepted answers
     hint?: string;
     svg?: string;
@@ -25,115 +30,12 @@ const CATEGORY_NAMES: Record<BankCategory, string> = {
     logical: 'Logical Reasoning',
     gk: 'General Knowledge',
     visual: 'Visual Reasoning',
+    psych: 'Problem Solving & Reflection',
 };
 
-const TIME_BY_TYPE: Record<string, number> = { mcq: 45, text: 75 };
+const TIME_BY_TYPE: Record<string, number> = { mcq: 45, text: 75, 'multi-text': 150 };
 const VISUAL_TIME = 60;
-
-// ─── SVG HELPERS (diagrams drawn with currentColor for the dark theme) ───────
-
-const S = 'stroke="currentColor" stroke-width="2" fill="none"';
-
-/** A compass rose used by direction-sense questions. */
-const COMPASS_SVG = `
-<svg viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg" style="max-width:220px">
-  <line x1="110" y1="30" x2="110" y2="190" ${S}/>
-  <line x1="30" y1="110" x2="190" y2="110" ${S}/>
-  <polygon points="110,18 104,32 116,32" fill="currentColor"/>
-  <polygon points="110,202 104,188 116,188" fill="currentColor"/>
-  <polygon points="18,110 32,104 32,116" fill="currentColor"/>
-  <polygon points="202,110 188,104 188,116" fill="currentColor"/>
-  <text x="110" y="14" font-size="14" fill="currentColor" text-anchor="middle">N</text>
-  <text x="110" y="216" font-size="14" fill="currentColor" text-anchor="middle">S</text>
-  <text x="10" y="114" font-size="14" fill="currentColor" text-anchor="middle">W</text>
-  <text x="210" y="114" font-size="14" fill="currentColor" text-anchor="middle">E</text>
-</svg>`;
-
-/** Renders a "problem figures" row (last box = ?) and an "answer figures" row. */
-function figureSeriesSvg(problem: string[], answers: string[]): string {
-    const box = (inner: string, x: number, y: number) =>
-        `<g transform="translate(${x},${y})"><rect x="0" y="0" width="90" height="90" ${S} opacity="0.5"/>${inner}</g>`;
-    const problemRow = problem
-        .map((fig, i) => box(fig, 10 + i * 105, 24))
-        .join('');
-    const answerRow = answers
-        .map(
-            (fig, i) =>
-                box(fig, 10 + i * 105, 158) +
-                `<text x="${55 + i * 105}" y="266" font-size="14" fill="currentColor" text-anchor="middle">${String.fromCharCode(65 + i)}</text>`
-        )
-        .join('');
-    const width = 20 + Math.max(problem.length, answers.length) * 105;
-    if (problem.length === 0) {
-        // Single row of labelled figures (e.g. odd-one-out questions)
-        return `
-<svg viewBox="0 132 ${width} 144" xmlns="http://www.w3.org/2000/svg" style="max-width:${width}px">
-  ${answerRow}
-</svg>`;
-    }
-    return `
-<svg viewBox="0 0 ${width} 276" xmlns="http://www.w3.org/2000/svg" style="max-width:${width}px">
-  <text x="10" y="16" font-size="12" fill="currentColor" opacity="0.7">PROBLEM FIGURES</text>
-  ${problemRow}
-  <text x="10" y="150" font-size="12" fill="currentColor" opacity="0.7">ANSWER FIGURES</text>
-  ${answerRow}
-</svg>`;
-}
-
-// Small figure snippets (drawn inside a 90×90 box)
-const FIG = {
-    qmark: `<text x="45" y="60" font-size="42" fill="currentColor" text-anchor="middle">?</text>`,
-    circle: `<circle cx="45" cy="45" r="27" ${S}/>`,
-    circleV: `<circle cx="45" cy="45" r="27" ${S}/><line x1="45" y1="18" x2="45" y2="72" ${S}/>`,
-    square: `<rect x="18" y="18" width="54" height="54" ${S}/>`,
-    squareV: `<rect x="18" y="18" width="54" height="54" ${S}/><line x1="45" y1="18" x2="45" y2="72" ${S}/>`,
-    squareH: `<rect x="18" y="18" width="54" height="54" ${S}/><line x1="18" y1="45" x2="72" y2="45" ${S}/>`,
-    squareD: `<rect x="18" y="18" width="54" height="54" ${S}/><line x1="18" y1="18" x2="72" y2="72" ${S}/>`,
-    dots: (n: number) => {
-        const pos = [
-            [45, 45], [30, 30], [60, 60], [60, 30], [30, 60], [45, 15],
-        ];
-        return Array.from({ length: n })
-            .map((_, i) => `<circle cx="${pos[i][0]}" cy="${pos[i][1]}" r="6" fill="currentColor"/>`)
-            .join('');
-    },
-    arrow: (angle: number) =>
-        `<g transform="rotate(${angle},45,45)"><line x1="15" y1="45" x2="66" y2="45" ${S}/><polygon points="75,45 60,37 60,53" fill="currentColor"/></g>`,
-    triInCircle: `<circle cx="45" cy="45" r="30" ${S}/><polygon points="45,22 65,60 25,60" ${S}/>`,
-    circleInTri: `<polygon points="45,12 78,72 12,72" ${S}/><circle cx="45" cy="52" r="15" ${S}/>`,
-    shadedQuads: (n: number) => {
-        const quads = [
-            `<rect x="18" y="18" width="27" height="27" fill="currentColor"/>`,
-            `<rect x="45" y="18" width="27" height="27" fill="currentColor"/>`,
-            `<rect x="45" y="45" width="27" height="27" fill="currentColor"/>`,
-            `<rect x="18" y="45" width="27" height="27" fill="currentColor"/>`,
-        ];
-        return `<rect x="18" y="18" width="54" height="54" ${S}/><line x1="45" y1="18" x2="45" y2="72" ${S}/><line x1="18" y1="45" x2="72" y2="45" ${S}/>${quads.slice(0, n).join('')}`;
-    },
-    triangle: `<polygon points="45,16 74,72 16,72" ${S}/>`,
-    rect: `<rect x="12" y="27" width="66" height="36" ${S}/>`,
-    rhombus: `<polygon points="45,14 74,45 45,76 16,45" ${S}/>`,
-    circleR: (r: number) => `<circle cx="45" cy="45" r="${r}" ${S}/>`,
-    dotCorner: (pos: 'TL' | 'TR' | 'BR' | 'BL' | 'C') => {
-        const p = { TL: [25, 25], TR: [65, 25], BR: [65, 65], BL: [25, 65], C: [45, 45] }[pos];
-        return `<rect x="15" y="15" width="60" height="60" ${S}/><circle cx="${p[0]}" cy="${p[1]}" r="6" fill="currentColor"/>`;
-    },
-    halfDisc: (angle: number) =>
-        `<g transform="rotate(${angle},45,45)"><path d="M 17 45 A 28 28 0 0 1 73 45 Z" fill="currentColor"/><circle cx="45" cy="45" r="28" ${S}/></g>`,
-    poly: (n: number) => {
-        const pts = Array.from({ length: n }, (_, i) => {
-            const a = ((-90 + (i * 360) / n) * Math.PI) / 180;
-            return `${(45 + 28 * Math.cos(a)).toFixed(1)},${(45 + 28 * Math.sin(a)).toFixed(1)}`;
-        }).join(' ');
-        return `<polygon points="${pts}" ${S}/>`;
-    },
-    manyRects: (n: number) =>
-        Array.from({ length: n })
-            .map((_, i) => `<rect x="${16 + (i % 3) * 21}" y="${16 + Math.floor(i / 3) * 21}" width="13" height="13" ${S}/>`)
-            .join(''),
-    lineAngle: (a: number) =>
-        `<g transform="rotate(${a},45,45)"><line x1="45" y1="15" x2="45" y2="75" ${S}/></g>`,
-};
+const PSYCH_TEXT_TIME = 120; // open-ended reflection needs more time than a short answer
 
 // ─── THE BANK ────────────────────────────────────────────────────────────────
 
@@ -239,6 +141,55 @@ const BANK: BankQuestion[] = [
     { category: 'gk', type: 'text', question: 'How many minutes are there in 2 hours? Type the number.', correctAnswer: '120', accept: ['120 minutes', '120 mins'] },
     { category: 'gk', type: 'mcq', question: 'Quaid-e-Azam Muhammad Ali Jinnah was born in which city?', options: ['Lahore', 'Karachi', 'Dhaka', 'Delhi'], correctAnswer: 'B' },
     { category: 'gk', type: 'mcq', question: 'Which planet is closest to the Sun?', options: ['Earth', 'Venus', 'Mercury', 'Mars'], correctAnswer: 'C' },
+    { category: 'gk', type: 'mcq', question: 'How many bones are there in the adult human body?', options: ['106', '206', '306', '256'], correctAnswer: 'B' },
+    { category: 'gk', type: 'mcq', question: 'Which vitamin does sunlight help the human body produce?', options: ['Vitamin A', 'Vitamin B', 'Vitamin C', 'Vitamin D'], correctAnswer: 'D' },
+    { category: 'gk', type: 'mcq', question: 'What is the currency of Japan?', options: ['Won', 'Yuan', 'Yen', 'Ringgit'], correctAnswer: 'C' },
+    { category: 'gk', type: 'mcq', question: 'Mount Everest lies in which mountain range?', options: ['Karakoram', 'Himalayas', 'Alps', 'Hindu Kush'], correctAnswer: 'B' },
+    { category: 'gk', type: 'mcq', question: 'Which gas makes up most of the Earth\'s atmosphere?', options: ['Oxygen', 'Carbon dioxide', 'Nitrogen', 'Hydrogen'], correctAnswer: 'C' },
+    { category: 'gk', type: 'mcq', question: 'Who is the national poet of Pakistan?', options: ['Faiz Ahmed Faiz', 'Allama Iqbal', 'Ahmed Faraz', 'Mirza Ghalib'], correctAnswer: 'B' },
+    { category: 'gk', type: 'text', question: 'In which year did Pakistan come into being? Type the year.', correctAnswer: '1947' },
+    { category: 'gk', type: 'mcq', question: 'Which is the smallest continent by land area?', options: ['Europe', 'Antarctica', 'Australia', 'South America'], correctAnswer: 'C' },
+    { category: 'gk', type: 'mcq', question: 'How many players are there in a cricket team?', options: ['9', '10', '11', '12'], correctAnswer: 'C' },
+    { category: 'gk', type: 'mcq', question: 'What is the boiling point of water at sea level?', options: ['90°C', '100°C', '110°C', '120°C'], correctAnswer: 'B' },
+    { category: 'gk', type: 'mcq', question: 'The Thar Desert is located in which province of Pakistan?', options: ['Punjab', 'Balochistan', 'Sindh', 'KPK'], correctAnswer: 'C' },
+    { category: 'gk', type: 'mcq', question: 'The Olympic Games are normally held after every how many years?', options: ['2 years', '3 years', '4 years', '5 years'], correctAnswer: 'C' },
+    { category: 'gk', type: 'mcq', question: 'Which is the largest planet in our solar system?', options: ['Saturn', 'Jupiter', 'Neptune', 'Earth'], correctAnswer: 'B' },
+    { category: 'gk', type: 'mcq', question: 'Faisal Mosque is located in which city?', options: ['Lahore', 'Karachi', 'Islamabad', 'Faisalabad'], correctAnswer: 'C' },
+    { category: 'gk', type: 'mcq', question: 'Which country gifted the Statue of Liberty to the USA?', options: ['England', 'France', 'Germany', 'Italy'], correctAnswer: 'B' },
+
+    // ── PROBLEM SOLVING & REFLECTION (open-ended, no right answer) ───────────
+    // These reveal HOW the student thinks: approach, values, creativity and
+    // self-awareness. They are marked on meaningful attempt, and the written
+    // answers feed the cognitive-feature and confidence analysis.
+    { category: 'psych', type: 'text', question: 'Your two best friends have had a serious fight and both want you to take their side. How would you handle this situation? Explain your reasoning.' },
+    { category: 'psych', type: 'text', question: 'You have an important exam tomorrow, but late at night a close friend calls you, upset, and really needs someone to talk to. What would you do, and why?' },
+    { category: 'psych', type: 'text', question: 'You studied hard for a test but still failed it. What do you think went wrong, and what would you do next?' },
+    { category: 'psych', type: 'text', question: 'A group member is not contributing to your class project and the deadline is near. How would you solve this problem?' },
+    { category: 'psych', type: 'text', question: 'What do you think matters more for success in life: hard work or luck? Give reasons for your answer.' },
+    { category: 'psych', type: 'text', question: 'You find a wallet on the street with cash and an ID card inside. What would you do? Describe your steps.' },
+    { category: 'psych', type: 'text', question: 'What do you think about using AI tools (like ChatGPT) for homework? When is it helpful and when is it harmful?' },
+    { category: 'psych', type: 'text', question: 'If you were the class monitor and caught your best friend cheating in a test, what would you do and why?' },
+    { category: 'psych', type: 'text', question: 'Describe a difficult problem you solved recently — in studies or daily life. How did you approach it?' },
+    { category: 'psych', type: 'text', question: 'You are leading a team and two members strongly disagree with each other\'s ideas. How would you decide what to do?' },
+    { category: 'psych', type: 'text', question: 'If you could change one thing about how subjects are taught in your institute, what would it be and why?' },
+    { category: 'psych', type: 'text', question: 'Your phone breaks one day before an important online registration deadline. What is your plan? Describe it.' },
+    { category: 'psych', type: 'text', question: 'A junior student asks you for the "secret to good grades". What advice would you honestly give, and why?' },
+    { category: 'psych', type: 'multi-text', question: 'Your class wants to organise a farewell party but has almost no budget. Give 3 different ways to make it successful anyway.' },
+    { category: 'psych', type: 'multi-text', question: 'The electricity goes out during your online exam. Give 3 backup plans you could use.' },
+    { category: 'psych', type: 'multi-text', question: 'Give 3 different ways a student can memorise difficult concepts effectively.' },
+    { category: 'psych', type: 'multi-text', question: 'Traffic near your campus is always jammed at closing time. Suggest 3 practical solutions.' },
+    { category: 'psych', type: 'multi-text', question: 'Many students feel sleepy in early morning classes. Give 3 realistic ways to fix this problem.' },
+    { category: 'psych', type: 'text', question: 'You get two good opportunities at the same time: an unpaid internship in your field and a paid part-time job outside it. How would you decide which one to take?' },
+    { category: 'psych', type: 'text', question: 'A close friend keeps borrowing your notes but never shares his own. How would you deal with this?' },
+    { category: 'psych', type: 'text', question: 'If you were given one full week with no classes and no exams, how would you spend it and why?' },
+    { category: 'psych', type: 'text', question: 'You notice a classmate being left out of every group activity. What would you do?' },
+    { category: 'psych', type: 'text', question: 'Your parents want you to choose a career you are not interested in. How would you handle this conversation?' },
+    { category: 'psych', type: 'text', question: 'You have three assignments due on the same day but time to properly complete only two. How would you decide what to do?' },
+    { category: 'psych', type: 'text', question: 'What does "failure" mean to you? Describe how you deal with it when it happens.' },
+    { category: 'psych', type: 'text', question: 'You believe a teacher has marked your paper unfairly. What steps would you take?' },
+    { category: 'psych', type: 'multi-text', question: 'Your university cafeteria food is poor quality. Suggest 3 realistic ways students could get it improved.' },
+    { category: 'psych', type: 'multi-text', question: 'A first-semester student is struggling to manage time. Give 3 practical time-management tips.' },
+    { category: 'psych', type: 'multi-text', question: 'Your study group gets distracted in every session. Give 3 ways to make the sessions productive.' },
 
     // ── VISUAL REASONING (diagram-based) ─────────────────────────────────────
     {
@@ -384,11 +335,12 @@ const BANK: BankQuestion[] = [
 
 /** Number of questions drawn from each category (total = 12). */
 const QUOTA: Record<BankCategory, number> = {
-    math: 3,
+    math: 0, // mathematical questions removed by request
     logical: 2,
-    verbal: 2,
-    visual: 4,
-    gk: 1,
+    verbal: 1,
+    visual: 3,
+    gk: 2,
+    psych: 4,
 };
 
 export const TOTAL_TEST_QUESTIONS = Object.values(QUOTA).reduce((a, b) => a + b, 0);
@@ -406,8 +358,8 @@ function shuffle<T>(arr: T[]): T[] {
 // Remembers the questions used in the last few tests (localStorage) so fresh
 // tests strongly prefer questions the student hasn't just seen.
 
-const RECENT_KEY = 'aita_recent_questions_v1';
-const RECENT_TESTS_REMEMBERED = 2; // avoid questions from the last N tests
+const RECENT_KEY = 'aita_recent_questions_v2';
+const RECENT_TESTS_REMEMBERED = 4; // avoid questions from the last N tests
 
 function getRecentKeys(): string[] {
     try {
@@ -430,43 +382,63 @@ function pushRecentTest(keys: string[]): void {
 }
 
 /**
- * Builds a fresh 15-question mixed test: random sample per category quota,
- * shuffled order, and at least two written (typed) questions guaranteed.
+ * How many of each category's quota are generated fresh (in real time, with
+ * random numbers/names/patterns) rather than drawn from the curated bank.
+ * GK and open-ended questions stay curated.
  */
+const GENERATED_PER_CATEGORY: Record<BankCategory, number> = {
+    visual: 2,
+    math: 0,
+    logical: 1,
+    verbal: 1,
+    gk: 0,
+    psych: 0, // open-ended prompts are curated, not templated
+};
+
 export function buildTest(): { scenario: Scenario; questions: Question[] } {
     const recent = new Set(getRecentKeys());
     let picked: BankQuestion[] = [];
     (Object.keys(QUOTA) as BankCategory[]).forEach(cat => {
-        const pool = BANK.filter(q => q.category === cat);
-        // Prefer questions not seen in the last few tests; top up from the
-        // rest only if the fresh pool is too small.
-        const fresh = shuffle(pool.filter(q => !recent.has(q.question)));
-        const seen = shuffle(pool.filter(q => recent.has(q.question)));
-        picked.push(...[...fresh, ...seen].slice(0, QUOTA[cat]));
+        // Fresh real-time generated questions first (avoiding recent output)
+        const generated = generateQuestions(cat, Math.min(GENERATED_PER_CATEGORY[cat], QUOTA[cat]), recent);
+        picked.push(...generated);
+
+        // Fill the rest from the curated bank, preferring questions not seen
+        // in the last few tests.
+        const remaining = QUOTA[cat] - generated.length;
+        if (remaining > 0) {
+            const pool = BANK.filter(q => q.category === cat);
+            const byRecency = (qs: BankQuestion[]) => [
+                ...shuffle(qs.filter(q => !recent.has(questionKey(q.question, q.svg)))),
+                ...shuffle(qs.filter(q => recent.has(questionKey(q.question, q.svg)))),
+            ];
+            if (cat === 'psych') {
+                // At most one "give 3 solutions" (multi-text) question per test
+                const multi = byRecency(pool.filter(q => q.type === 'multi-text')).slice(0, 1);
+                const texts = byRecency(pool.filter(q => q.type === 'text'));
+                picked.push(...[...multi, ...texts].slice(0, remaining));
+            } else {
+                picked.push(...byRecency(pool).slice(0, remaining));
+            }
+        }
     });
 
-    // Guarantee at least 2 written questions in every test
-    const textCount = picked.filter(q => q.type === 'text').length;
-    if (textCount < 2) {
-        const spareTexts = shuffle(BANK.filter(q => q.type === 'text' && !picked.includes(q)));
-        for (let i = 0; i < 2 - textCount && i < spareTexts.length; i++) {
-            const spare = spareTexts[i];
-            const replaceIdx = picked.findIndex(q => q.category === spare.category && q.type === 'mcq');
-            if (replaceIdx !== -1) picked[replaceIdx] = spare;
-        }
-    }
-
     picked = shuffle(picked);
-    pushRecentTest(picked.map(q => q.question));
+    pushRecentTest(picked.map(q => questionKey(q.question, q.svg)));
 
     const questions: Question[] = picked.map((q, i) => ({
         id: i + 1,
         phase: i + 1,
         phaseName: CATEGORY_NAMES[q.category],
         type: q.type,
-        timeLimit: q.svg ? VISUAL_TIME : TIME_BY_TYPE[q.type] ?? 45,
+        timeLimit:
+            q.category === 'psych'
+                ? (q.type === 'multi-text' ? TIME_BY_TYPE['multi-text'] : PSYCH_TEXT_TIME)
+                : q.svg ? VISUAL_TIME : TIME_BY_TYPE[q.type] ?? 45,
         question: q.question,
-        hint: q.hint,
+        hint: q.hint ?? (q.category === 'psych'
+            ? 'There is no right or wrong answer — we are interested in HOW you think, so explain your reasoning.'
+            : undefined),
         options: q.options,
         category: q.category,
         svg: q.svg,
@@ -477,12 +449,12 @@ export function buildTest(): { scenario: Scenario; questions: Question[] } {
     const totalTimeLimit = questions.reduce((s, q) => s + q.timeLimit, 0);
 
     const scenario: Scenario = {
-        title: '🧠 General Aptitude Test',
+        title: '🧠 Aptitude & Thinking Assessment',
         description:
-            `A single mixed test of ${TOTAL_TEST_QUESTIONS} questions covering mathematics, verbal reasoning, logical reasoning, general knowledge and visual (diagram) puzzles. Questions are randomly selected — every attempt is different.`,
+            `A single mixed test of ${TOTAL_TEST_QUESTIONS} questions covering problem-solving & reflection, general knowledge, logical reasoning, verbal reasoning and visual (diagram) puzzles. Questions are randomly selected — every attempt is different.`,
         context_details:
-            `• ${TOTAL_TEST_QUESTIONS} questions — answer all of them\n• Mix of multiple-choice, written and diagram-based questions\n• You can move back and forth between questions\n• Your result dashboard is shown right after you submit`,
-        constraint: 'Answer every question — unanswered questions count against your accuracy.',
+            `• ${TOTAL_TEST_QUESTIONS} questions — answer all of them\n• Mix of multiple-choice, written and diagram-based questions\n• Open-ended questions have no right answer — they earn their mark through a genuine, thought-out attempt\n• You can move back and forth between questions\n• Your result dashboard is shown right after you submit`,
+        constraint: 'Answer every question — unanswered questions count against your marks.',
         urgency: `Finish before the timer runs out (${Math.round(totalTimeLimit / 60)} minutes total).`,
         totalTimeLimit,
     };
@@ -498,7 +470,17 @@ function normalize(s: string): string {
 
 /** Grades a single answer against the bank question. */
 export function isCorrect(q: Question, answer: string | string[] | undefined): boolean {
-    if (!q.correctAnswer || answer == null) return false;
+    if (answer == null) return false;
+
+    // Open-ended questions (no correctAnswer): the mark is earned through a
+    // meaningful attempt — a real written response, not a token keystroke.
+    if (!q.correctAnswer) {
+        if (Array.isArray(answer)) {
+            return answer.filter(s => (s || '').trim().length >= 4).length >= 2;
+        }
+        return String(answer).trim().length >= 20;
+    }
+
     const raw = Array.isArray(answer) ? answer.join(' ') : String(answer);
     if (raw.trim().length === 0) return false;
 

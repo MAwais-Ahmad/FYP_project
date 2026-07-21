@@ -19,7 +19,7 @@ export interface Scenario {
     totalTimeLimit?: number;
 }
 
-export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection' | 'slider';
+export type QuestionType = 'text' | 'mcq' | 'mcq-urgent' | 'multi-text' | 'ranking' | 'reflection' | 'slider' | 'vark';
 
 export interface Question {
     id: number;
@@ -40,6 +40,8 @@ export interface Question {
     correctAnswer?: string;
     accept?: string[];
     category?: string;
+    // Inline SVG diagram for visual/aptitude questions
+    svg?: string;
 }
 
 export interface QuestionMetrics {
@@ -103,7 +105,9 @@ export type ScreenType =
     | 'results'
     | 'session-dashboard'
     | 'record-detail'
-    | 'assessment-setup';
+    | 'assessment-setup'
+    | 'general-quiz'
+    | 'general-results';
 
 export type DifficultySignal = 'harder' | 'easier' | 'consistency_test';
 
@@ -144,10 +148,15 @@ export interface ScenarioResult {
     performanceScore: number;
     accuracyScore: number;
     cognitive: CognitiveFeatures;
+    vark?: { visual: number; auditory: number; readWrite: number; kinesthetic: number };
     avgTimeToStart: number;
     totalResponseLength: number;
     skippedQuestions: number;
     overtimeCount: number;
+    // General aptitude test marks (1 mark per question)
+    marksObtained?: number;
+    totalMarks?: number;
+    perQuestionCorrect?: Record<number, boolean>;
     answers: Answers;
     questions?: Question[];
     itemizedDetails?: ItemizedDetail[];

@@ -9,3 +9,5 @@ export { InterScenarioScreen } from './screens/InterScenarioScreen';
 export { AssessmentSetupScreen } from './screens/AssessmentSetupScreen';
 export { CustomQuizScreen } from './screens/CustomQuizScreen';
 export { CustomResultsScreen } from './screens/CustomResultsScreen';
+export { GeneralQuizScreen } from './screens/GeneralQuizScreen';
+export { GeneralResultsScreen } from './screens/GeneralResultsScreen';

@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "start": "node server/server.cjs",
-    "server": "node server/server.cjs"
+    "start": "node server/start-local.cjs",
+    "server": "node server/start-local.cjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
@@ -31,6 +31,7 @@
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
+    "embedded-postgres": "^18.4.0-beta.17",
     "postcss": "^8.4.32",
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.0",

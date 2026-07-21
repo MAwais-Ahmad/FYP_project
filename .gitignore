@@ -20,3 +20,6 @@ Thumbs.db
 # OCR Data files & temporary uploads
 *.traineddata
 uploads/
+
+# Local embedded PostgreSQL data
+.pgdata/
