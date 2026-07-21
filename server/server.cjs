@@ -840,36 +840,39 @@ function shuffle(arr) {
   return a;
 }
 
-// Build a dynamic phase order of 12 questions based on scenario number
+// ─── FIXED 15-QUESTION BLUEPRINT (General AI Scenario) ────────────────────────
+// The STRUCTURE is fixed (parallel-forms psychometrics); only the story/content
+// is randomised per run. This keeps timeVariance comparable across runs and —
+// crucially — implements the 3-tier transfer spine (L1 direct → L2 near → L3 far)
+// that separates a true Fast Learner from a Superficial Mimic.
+//   level : 0 = supporting/cognitive, 1/2/3 = transfer tier, 'R' = late re-probe.
+//   scored: whether the item carries a correctness answerKey.
+const SCENARIO_BLUEPRINT = [
+  { phaseName: 'Understanding',           type: 'text',       level: 0,   scored: false, desc: 'Identify the CORE tension / underlying problem in this specific story.', timeRange: '60s' },
+  { phaseName: 'Information Filtering',    type: 'mcq',        level: 1,   scored: true,  desc: 'LEVEL 1 (DIRECT): apply the hidden LOGIC_RULE directly — which data/person/resource to trust MOST.', timeRange: '40s' },
+  { phaseName: 'Planning',                type: 'ranking',    level: 1,   scored: true,  desc: 'LEVEL 1 (DIRECT): rank 3-4 strategies by how well they follow the LOGIC_RULE in the main story.', timeRange: '60s' },
+  { phaseName: 'Risk Mitigation',         type: 'mcq',        level: 2,   scored: true,  desc: 'LEVEL 2 (NEAR TRANSFER): SAME LOGIC_RULE, brand-new sub-context/characters — pick the smartest safeguard.', timeRange: '40s' },
+  { phaseName: 'Resource Allocation',     type: 'slider',     level: 2,   scored: true,  desc: 'LEVEL 2 (NEAR TRANSFER): apply the SAME rule to a re-skinned allocation problem. (Output slider min/max/unit.)', timeRange: '45s' },
+  { phaseName: 'Execution Twist',         type: 'mcq-urgent', level: 3,   scored: true,  desc: 'LEVEL 3 (FAR TRANSFER): SAME rule + a SUDDEN hidden variable/crisis that changes what the rule implies.', timeRange: '30s' },
+  { phaseName: 'Complex Dilemma',         type: 'mcq',        level: 3,   scored: true,  desc: 'LEVEL 3 (FAR TRANSFER): the rule under noise + a misleading option — naive pattern-matching must FAIL here.', timeRange: '50s' },
+  { phaseName: 'Information Seeking',      type: 'mcq',        level: 0,   scored: false, desc: 'ORIENTATION: one option must be to gather more data / test / ask a mentor, vs. guessing or assuming.', timeRange: '40s' },
+  { phaseName: 'Three Approaches',        type: 'multi-text', level: 0,   scored: false, desc: 'CREATIVITY: ask for 3 DISTINCT approaches to a knotty part of the story; include a "hint". (UI shows 3 boxes.)', timeRange: '90s' },
+  { phaseName: 'Resourceful Constraint',  type: 'slider',     level: 0,   scored: true,  desc: 'CREATIVITY under scarcity: allocate a very tight resource cleverly. (Output slider min/max/unit.)', timeRange: '45s' },
+  { phaseName: 'Collaboration',           type: 'text',       level: 0,   scored: false, desc: 'Write exactly what you would say to persuade, delegate, or manage a specific person in the story.', timeRange: '60s' },
+  { phaseName: 'Ethical Dilemma',         type: 'mcq',        level: 0,   scored: true,  desc: 'A tough choice between the right thing vs the popular/easy thing, specific to this story.', timeRange: '40s' },
+  { phaseName: 'Information Filtering II', type: 'mcq',        level: 'R', scored: true,  desc: 'CONSISTENCY RE-PROBE: another trust/priority judgement (like the Level-1 item) LATE in the test to measure pacing & focus drift.', timeRange: '40s' },
+  { phaseName: 'Risk Recognition',        type: 'text',       level: 0,   scored: false, desc: 'SELF-AWARENESS: which of your own earlier decisions was riskiest, and why?', timeRange: '60s' },
+  { phaseName: 'Reflection',              type: 'reflection', level: 0,   scored: false, desc: 'Hindsight & calibration. Ask ONLY: "Looking back, what would you do differently and why?"', timeRange: '0 (unlimited)' },
+];
+
+// Build the fixed 15-question phase order. The skeleton is deterministic; only
+// the scenario CONTENT varies per run. `scenarioNumber` is kept for signature
+// compatibility but no longer alters the structure.
 function buildPhaseOrder(scenarioNumber) {
-  let selected = [];
-
-  if (scenarioNumber <= 2) {
-    // 12 Interactive Questions = 12 total
-    let interactivePool = [];
-    for (let i = 0; i < 2; i++) {
-      interactivePool.push(...INTERACTIVE_TYPES);
-    }
-    selected = shuffle(interactivePool).slice(0, 12);
-  } else {
-    // Scenario 3: 9 Interactive, 3 Text (including Reflection) = 12 total
-    let interactivePool = [];
-    for (let i = 0; i < 2; i++) {
-      interactivePool.push(...INTERACTIVE_TYPES);
-    }
-    selected = shuffle(interactivePool).slice(0, 9);
-
-    // Add 3 text types at the end (Reflection is always absolute last)
-    selected.push(TEXT_TYPES[0]); // Understanding
-    selected.push(TEXT_TYPES[1]); // Collaboration
-    selected.push(TEXT_TYPES[2]); // Reflection
-  }
-
-  // Assign IDs and Phases sequentially
-  return selected.map((item, index) => ({
+  return SCENARIO_BLUEPRINT.map((item, index) => ({
     id: index + 1,
     phase: index + 1,
-    ...item
+    ...item,
   }));
 }
 
@@ -1576,7 +1579,7 @@ app.post('/api/generate-scenario', async (req, res) => {
 
     // Describe the exact 12 questions (in their display order) for the LLM.
     const phaseSpec = phaseOrder
-      .map((p, idx) => `  ${idx + 1}. id=${p.id} | phase=${p.phase} | phaseName="${p.phaseName}" | type=${p.type} | timeLimit≈${p.timeRange} | TASK: ${p.desc}`)
+      .map((p, idx) => `  ${idx + 1}. id=${p.id} | level=${p.level} | phaseName="${p.phaseName}" | type=${p.type} | scored=${p.scored} | timeLimit≈${p.timeRange} | TASK: ${p.desc}`)
       .join('\n');
 
     const diversityPrompt = previousThemes.length > 0
@@ -1619,9 +1622,18 @@ IMPORTANT RULES:
 8. You may include a "timeLimit" per question, but it is optional — the server assigns fixed challenge timings by question type, so do not agonise over it.
 9. "totalTimeLimit" is computed automatically by the server; you may omit it.
 
-CRITICAL — QUESTION STRUCTURE (anti-predictability):
-You MUST output EXACTLY 12 questions, in the EXACT order, ids, phases, phaseNames and types listed below.
-This order is RANDOMISED for this session — honour it precisely so the experience is never repetitive:
+CRITICAL — HIDDEN LOGIC RULE (this powers the whole diagnosis):
+First, silently invent ONE hidden LOGIC_RULE for this scenario — a single decision principle
+(e.g. "prioritise the option that reduces the highest-probability irreversible loss").
+NEVER state the rule to the student. Instead INSTANTIATE the SAME rule across three transfer tiers:
+- LEVEL 1 (DIRECT): the rule applies plainly in the MAIN story; the correct answer follows it directly.
+- LEVEL 2 (NEAR TRANSFER): the SAME rule, re-skinned into a COMPLETELY different sub-context (new names/domain). Surface changes; the underlying rule does NOT.
+- LEVEL 3 (FAR TRANSFER): the SAME rule PLUS a hidden variable / twist / misleading option, so naive pattern-matching FAILS but the rule still gives the right call.
+The re-probe item (level="R") must test the SAME kind of judgement as the Level-1 items.
+
+CRITICAL — QUESTION STRUCTURE:
+You MUST output EXACTLY 15 questions, in the EXACT order, ids, phaseNames, levels and types listed below.
+Honour each line precisely:
 ${phaseSpec}
 
 Type-specific requirements:
@@ -1629,12 +1641,16 @@ Type-specific requirements:
 - type "mcq": include exactly 4 plausible, scenario-specific "options" (no obvious throwaway answers).
 - type "ranking": include exactly 3-4 plausible, scenario-specific "options" to be ranked.
 - type "slider": must include "min", "max", and "unit" (e.g. "Rs.", "Days", "Hours") for budget/resource allocation.
-- type "mcq-urgent": include "urgentUpdate" (a surprising twist/alert) and 4 options reacting to it.
 - type "multi-text": ask for 3 distinct approaches; include a "hint". (The UI shows 3 input boxes.)
-- type "mcq-urgent": include a vivid "urgentUpdate" (a sudden twist UNIQUE to this story, prefixed with 🚨) AND exactly 4 "options". Keep it tight and high-pressure. The twist must be freshly generated, never a stock template.
+- type "mcq-urgent": you MUST include a SEPARATE "urgentUpdate" field — a vivid sudden twist UNIQUE to this story, prefixed with 🚨. Do NOT put the twist inside "question"; keep "question" as the decision prompt itself. Also include exactly 4 "options" reacting to the twist. Keep it tight and high-pressure; never a stock template.
 - type "reflection": timeLimit MUST be 0. Ask ONLY: "Looking back, what would you do differently and why?" (Do NOT ask the student to self-rate a confidence number — confidence is measured automatically.)
 
-Return ONLY this JSON structure (questions array must follow the shuffled order above):
+SCORING KEYS (required — the classifier needs these):
+- For EVERY item with scored=true, include an "answerKey": for mcq/mcq-urgent the 0-based index of the best option; for ranking the correct ordered array of the option strings; for slider the optimal numeric value (or a band {"min":x,"max":y}).
+- Echo the "level" of every question (1, 2, 3, "R" or 0) EXACTLY as listed above.
+- For the "Information Seeking" item, set "answerKey" to the 0-based index of the information-seeking option.
+
+Return ONLY this JSON structure (questions array MUST follow the order above):
 {
   "scenario": {
     "title": "[emoji] [Creative 4-6 word title]",
@@ -1645,13 +1661,13 @@ Return ONLY this JSON structure (questions array must follow the shuffled order 
     "totalTimeLimit": [number of seconds]
   },
   "questions": [
-    { "id": <n>, "phase": <cognitivePhaseNumber>, "phaseName": "<exact name>", "type": "<exact type>", "timeLimit": <seconds>, "question": "...", "hint": "...(text/multi-text)", "context": "...(optional, text only)", "options": ["...","...","...","..."], "urgentUpdate": "🚨 ...(mcq-urgent only)" }
+    { "id": <n>, "level": <1|2|3|"R"|0>, "phaseName": "<exact name>", "type": "<exact type>", "timeLimit": <seconds>, "question": "...", "hint": "...(text/multi-text)", "context": "...(optional, text only)", "options": ["...","...","...","..."], "urgentUpdate": "🚨 ...(mcq-urgent only)", "answerKey": <index | ordered array | number (scored items ONLY)> }
   ]
 }`,
         },
       ],
       temperature: 0.92,
-      max_tokens: 2500,
+      max_tokens: 4000,
       response_format: { type: 'json_object' },
     });
 
@@ -1666,20 +1682,30 @@ Return ONLY this JSON structure (questions array must follow the shuffled order 
     // Defends against LLM drift so the frontend always renders valid types/order.
     const allowedTypes = new Set(['text', 'mcq', 'mcq-urgent', 'multi-text', 'ranking', 'reflection', 'slider']);
     if (Array.isArray(data.questions)) {
-      data.questions = data.questions.slice(0, 12).map((q, i) => {
+      data.questions = data.questions.slice(0, 15).map((q, i) => {
 
         const spec = phaseOrder[i] || phaseOrder[phaseOrder.length - 1];
         const type = allowedTypes.has(q.type) ? q.type : spec.type;
-        return {
+        const normalized = {
           ...q,
           id: i + 1,
           phase: q.phase || spec.phase,
           phaseName: q.phaseName || spec.phaseName,
+          // Preserve the fixed transfer tier from the blueprint even if the model drifts.
+          level: q.level ?? spec.level,
           type,
           // Fixed per-type limit (ignore whatever the model returned) so timing
           // is a consistent challenge. Still recorded for behavioural metrics.
           timeLimit: TIME_BY_TYPE[type] ?? 40,
         };
+        // Safety net: mcq-urgent MUST carry an urgentUpdate for the UI alert banner.
+        // The model sometimes folds the twist into the question text — recover it so
+        // the render never silently loses the crisis element.
+        if (type === 'mcq-urgent' && !normalized.urgentUpdate) {
+          const m = (normalized.question || '').match(/🚨[^.!?\n]*[.!?]/);
+          normalized.urgentUpdate = m ? m[0].trim() : '🚨 A sudden twist just changed everything — decide fast.';
+        }
+        return normalized;
       });
     }
     // Always derive a TIGHT overall limit from the fixed per-question times
