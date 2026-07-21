@@ -51,8 +51,11 @@ async function ensureLocalDb() {
   process.env.DATABASE_URL = LOCAL_URL;
   process.env.DIRECT_URL = LOCAL_URL;
 
-  // Keep the schema in sync (idempotent, fast when nothing changed)
-  execSync('npx prisma db push --skip-generate', {
+  // Keep the schema in sync AND regenerate the Prisma client (without
+  // --skip-generate) so a stale client can never lag behind schema changes
+  // like the session `assessment` field — the cause of session-assessment saves
+  // failing with "Unknown argument `assessment`".
+  execSync('npx prisma db push', {
     cwd: path.join(__dirname, '..'),
     stdio: 'inherit',
     env: { ...process.env },

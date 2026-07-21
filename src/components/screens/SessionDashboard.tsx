@@ -88,8 +88,10 @@ export function SessionDashboard({
     const [previewData, setPreviewData] = useState<any>(null);
     const [previewError, setPreviewError] = useState('');
 
-    const loadData = async () => {
-        setIsLoading(true);
+    // `silent` background refreshes (used by auto-polling) don't toggle the
+    // full-screen loader or clobber the view with a transient network error.
+    const loadData = async (silent = false) => {
+        if (!silent) setIsLoading(true);
         try {
             const data = await getSessionView(sessionId);
             if (data.success) {
@@ -99,19 +101,30 @@ export function SessionDashboard({
                 setAssessmentKind(data.assessmentKind);
                 setMe(data.me || { joined: false, completed: false, recordId: null, record: null });
                 setMembers(data.members || []);
-            } else {
+                setError('');
+            } else if (!silent) {
                 setError(data.error || 'Could not load session');
             }
         } catch {
-            setError('Failed to load session data');
+            if (!silent) setError('Failed to load session data');
         } finally {
-            setIsLoading(false);
+            if (!silent) setIsLoading(false);
         }
     };
 
     useEffect(() => {
         loadData();
     }, [sessionId]);
+
+    // Participant auto-wait: while a joiner is waiting for the host to publish
+    // the assessment, silently poll so it appears automatically (no manual
+    // refresh). Stops once the assessment exists, the user is the host, or the
+    // component unmounts.
+    useEffect(() => {
+        if (isHost || hasAssessment) return;
+        const id = setInterval(() => loadData(true), 4000);
+        return () => clearInterval(id);
+    }, [isHost, hasAssessment, sessionId]);
 
     const handleCopyCode = () => {
         if (session?.code) {
@@ -291,9 +304,17 @@ export function SessionDashboard({
                             <div className="text-4xl animate-pulse">⏳</div>
                             <h2 className="text-lg font-semibold">Waiting for the host…</h2>
                             <p className="text-white/50 text-sm max-w-md mx-auto">
-                                The host hasn't created the assessment yet. Please wait — once it's ready you'll be able to start it here.
+                                The host hasn't created the assessment yet. You're in — this screen updates
+                                automatically the moment the host publishes it, and it'll appear right here.
                             </p>
-                            <button onClick={loadData} className="btn-secondary !py-2 !px-5 text-sm">🔄 Check again</button>
+                            <div className="flex items-center justify-center gap-2 text-xs text-primary-300">
+                                <span className="w-2 h-2 rounded-full bg-primary-400 animate-ping"></span>
+                                <span>Checking automatically…</span>
+                            </div>
+                            <div className="flex items-center justify-center gap-3 pt-1">
+                                <button onClick={() => loadData()} className="btn-secondary !py-2 !px-5 text-sm">🔄 Check now</button>
+                                <button onClick={onBack} className="btn-secondary !py-2 !px-5 text-sm">🚪 Exit</button>
+                            </div>
                         </>
                     ) : me.completed ? (
                         <>
@@ -333,7 +354,7 @@ export function SessionDashboard({
                                 ({completedMembers.length}/{members.length} completed)
                             </span>
                         </h2>
-                        <button onClick={loadData} className="btn-secondary !py-1.5 !px-3 text-xs">🔄 Refresh</button>
+                        <button onClick={() => loadData()} className="btn-secondary !py-1.5 !px-3 text-xs">🔄 Refresh</button>
                     </div>
 
                     {members.length === 0 ? (
