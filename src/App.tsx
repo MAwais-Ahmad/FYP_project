@@ -272,11 +272,6 @@ function App() {
         }
     };
 
-    // AI Scenario flow (existing, solo)
-    const handleStartAIScenario = () => {
-        goToWelcome();
-    };
-
     // Custom Exam flow (new)
     const handleStartCustomExam = (exam: GeneratedExam) => {
         setCustomExam(exam);
@@ -441,7 +436,6 @@ function App() {
             {/* Assessment Setup Screen (Mode Selection) */}
             {screen === 'assessment-setup' && (
                 <AssessmentSetupScreen
-                    onStartAIScenario={handleStartAIScenario}
                     onStartCustomExam={handleStartCustomExam}
                     onStartGeneralQuiz={handleStartGeneralQuiz}
                     sessionAuthor={authoringSession}

@@ -4,7 +4,6 @@ import { CustomExamQuestion, CustomQuestionType, ExamDifficulty, GeneratedExam }
 import { appendCognitiveProbes } from '../../utils/cognitiveProbes';
 
 interface AssessmentSetupScreenProps {
-    onStartAIScenario: () => void;
     onStartCustomExam: (exam: GeneratedExam) => void;
     onStartGeneralQuiz?: () => void;
     onBack: () => void;
@@ -188,7 +187,6 @@ function ManualQuestionsEditor({
 }
 
 export function AssessmentSetupScreen({
-    onStartAIScenario,
     onStartCustomExam,
     onStartGeneralQuiz,
     onBack,
@@ -623,27 +621,27 @@ export function AssessmentSetupScreen({
                             </button>
                         )}
 
-                        {/* General AI Scenario */}
-                        <button
-                            onClick={() => {
-                                if (sessionAuthor) setShowScenarioDifficulty(true);
-                                else onStartAIScenario();
-                            }}
-                            className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-primary-500/30"
-                        >
-                            <div className="flex items-start gap-4">
-                                <div className="text-4xl group-hover:scale-110 transition-transform">🧠</div>
-                                <div className="space-y-1">
-                                    <h3 className="font-bold text-xl">General AI Scenario</h3>
-                                    <p className="text-white/50 text-sm leading-relaxed">
-                                        AI generates interactive dilemmas with sliders, rankings, and MCQs. Measures cognitive profile through behavioral telemetry.
-                                    </p>
-                                    <span className="inline-block text-xs bg-primary-500/20 text-primary-300 px-2 py-0.5 rounded-full mt-1">
-                                        {sessionAuthor ? 'One shared scenario for all' : 'Existing Flow'}
-                                    </span>
+                        {/* General AI Scenario — session authoring only; the solo
+                            "general quiz" is the General Aptitude Test above. */}
+                        {sessionAuthor && (
+                            <button
+                                onClick={() => setShowScenarioDifficulty(true)}
+                                className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-primary-500/30"
+                            >
+                                <div className="flex items-start gap-4">
+                                    <div className="text-4xl group-hover:scale-110 transition-transform">🧠</div>
+                                    <div className="space-y-1">
+                                        <h3 className="font-bold text-xl">General AI Scenario</h3>
+                                        <p className="text-white/50 text-sm leading-relaxed">
+                                            AI generates interactive dilemmas with sliders, rankings, and MCQs. Measures cognitive profile through behavioral telemetry.
+                                        </p>
+                                        <span className="inline-block text-xs bg-primary-500/20 text-primary-300 px-2 py-0.5 rounded-full mt-1">
+                                            One shared scenario for all
+                                        </span>
+                                    </div>
                                 </div>
-                            </div>
-                        </button>
+                            </button>
+                        )}
 
                         {/* Custom Paper */}
                         <button
