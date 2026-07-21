@@ -345,6 +345,74 @@ function keywordHits(text: string, keywords: string[]): number {
     return keywords.reduce((n, k) => (text.includes(k) ? n + 1 : n), 0);
 }
 
+// ─── FACTORS 2 & 3: BEHAVIOUR + DECISION DYNAMICS ────────────────────────────
+// Nudges cognitive scores using behavioural telemetry (answer changes, backtracks,
+// rushing) and decision dynamics (pacing, engagement). Shared so the SAME two
+// factors apply whether the Language base (factor 1) comes from the offline
+// heuristic (keyword analysis) or from the AI grader (see blendCognitiveWithBehavior).
+// This realises the Tri-Factor design consistently. Returns clamped, un-rounded values.
+export function applyBehaviorDecisionFactors(
+    base: CognitiveFeatures,
+    m?: OverallMetrics
+): CognitiveFeatures {
+    let reflection_depth = base.reflection_depth;
+    let self_awareness = base.self_awareness;
+    let learning_orientation = base.learning_orientation;
+    let creativity_score = base.creativity_score;
+
+    if (m) {
+        // reflection_depth ← pacing (taking 45–90s) + reviewing (backtracks)
+        if (m.avgResponseTime >= 45 && m.avgResponseTime <= 90) reflection_depth += 0.15;
+        else if (m.avgResponseTime < 25) reflection_depth -= 0.15; // rushing = shallow
+        if (m.backtrackCount > 1) reflection_depth += 0.1;
+
+        // self_awareness ← self-correction (moderate answer changes / backtracks)
+        if (m.totalAnswerChanges >= 2 && m.totalAnswerChanges <= 5) self_awareness += 0.2;
+        else if (m.totalAnswerChanges > 6) self_awareness += 0.1; // too many ≈ guessing
+        if (m.backtrackCount > 0) self_awareness += 0.1;
+        if (m.rushedDecisions > 2) self_awareness -= 0.1;
+
+        // learning_orientation ← engagement + respecting limits
+        if (m.skippedQuestions === 0) learning_orientation += 0.2;
+        if (m.overtimeCount <= 1) learning_orientation += 0.1;
+        if (m.rushedDecisions === 0) learning_orientation += 0.1;
+
+        // creativity_score ← exploring alternatives
+        if (m.totalAnswerChanges >= 1 && m.totalAnswerChanges <= 4) creativity_score += 0.2;
+    }
+
+    return {
+        reflection_depth: clamp01(reflection_depth),
+        self_awareness: clamp01(self_awareness),
+        learning_orientation: clamp01(learning_orientation),
+        creativity_score: clamp01(creativity_score),
+        insights: base.insights,
+    };
+}
+
+/**
+ * Blend the AI grader's Language-based cognitive scores (factor 1) with Behaviour +
+ * Decision Dynamics (factors 2 & 3) → the full Tri-Factor evaluation. Applied
+ * whenever real written text was scored by the AI, in BOTH the custom-exam and the
+ * General-AI-Scenario flows, so a strong write-up is confirmed (or tempered) by how
+ * the student actually behaved.
+ */
+export function blendCognitiveWithBehavior(
+    ai: CognitiveFeatures,
+    m?: OverallMetrics
+): CognitiveFeatures {
+    const adj = applyBehaviorDecisionFactors(ai, m);
+    return {
+        reflection_depth: Math.round(adj.reflection_depth * 100) / 100,
+        self_awareness: Math.round(adj.self_awareness * 100) / 100,
+        learning_orientation: Math.round(adj.learning_orientation * 100) / 100,
+        creativity_score: Math.round(adj.creativity_score * 100) / 100,
+        insights: (ai.insights && ai.insights.length ? ai.insights.slice() : []).concat(
+            'Tri-Factor: AI language assessment refined by behaviour + decision dynamics.'
+        ),
+    };
+}
+
 /**
  * Reliable, fully offline estimate of cognitive features from the raw answers.
  * Used as a fallback when the LLM evaluation fails or is unavailable.
@@ -373,57 +441,26 @@ export function heuristicCognitiveFeatures(
     const uniqueWords = new Set(writtenText.split(/\s+/).filter(Boolean)).size;
     const lexicalDiversity = words > 0 ? uniqueWords / words : 0;
 
-    // 1. Reflection Depth (Base on reflection length + causal reasoning)
+    // ── FACTOR 1: LANGUAGE — base cognitive scores from the written text ──────
     const lengthScore = clamp01(words / 45); // 45+ words of written text is a solid reflection for a scenario
     const causalScore = clamp01(keywordHits(writtenText, CAUSAL_KEYWORDS) / 2);
-    let reflection_depth = lengthScore * 0.6 + causalScore * 0.4;
+    const baseReflection = lengthScore * 0.6 + causalScore * 0.4;
+    const baseSelfAware = clamp01(keywordHits(reflection, SELF_AWARE_KEYWORDS) / 2);
+    const baseLearning = clamp01(keywordHits(writtenText, LEARNING_KEYWORDS) / 2);
+    const baseCreativity = lexicalDiversity * 0.5 + clamp01(words / 60) * 0.3;
 
-    // Adjust reflection depth with behavioral indicators if available
-    if (overallMetrics) {
-        // Average response time: taking time (45s - 90s) increases reflection depth
-        const avgTime = overallMetrics.avgResponseTime;
-        if (avgTime >= 45 && avgTime <= 90) reflection_depth += 0.15;
-        else if (avgTime < 25) reflection_depth -= 0.15; // Rushing shows shallow reflection
-        
-        // Backtracking shows review and deeper processing
-        if (overallMetrics.backtrackCount > 1) reflection_depth += 0.1;
-    }
-    reflection_depth = clamp01(reflection_depth);
-
-    // 2. Self-Awareness (Base on self-critical keywords in reflection + backtracking)
-    const selfAwareHits = keywordHits(reflection, SELF_AWARE_KEYWORDS);
-    let self_awareness = clamp01(selfAwareHits / 2);
-
-    if (overallMetrics) {
-        // Changing answers indicates self-correction
-        const changes = overallMetrics.totalAnswerChanges;
-        if (changes >= 2 && changes <= 5) self_awareness += 0.2;
-        else if (changes > 6) self_awareness += 0.1; // Too many might be guessing
-        
-        if (overallMetrics.backtrackCount > 0) self_awareness += 0.1;
-        if (overallMetrics.rushedDecisions > 2) self_awareness -= 0.1; // Careless rushing indicates lower self-awareness
-    }
-    self_awareness = clamp01(self_awareness);
-
-    // 3. Learning Orientation (Base on learning keywords + steady performance)
-    const learningHits = keywordHits(writtenText, LEARNING_KEYWORDS);
-    let learning_orientation = clamp01(learningHits / 2);
-
-    if (overallMetrics) {
-        if (overallMetrics.skippedQuestions === 0) learning_orientation += 0.2; // Completed all questions
-        if (overallMetrics.overtimeCount <= 1) learning_orientation += 0.1; // Respects limits
-        if (overallMetrics.rushedDecisions === 0) learning_orientation += 0.1; // Didn't rush through
-    }
-    learning_orientation = clamp01(learning_orientation);
-
-    // 4. Creativity (Base on lexical diversity + original choices)
-    let creativity_score = lexicalDiversity * 0.5 + clamp01(words / 60) * 0.3;
-    if (overallMetrics) {
-        // Moderate revisions (exploring alternatives) is associated with creative problem solving
-        const changes = overallMetrics.totalAnswerChanges;
-        if (changes >= 1 && changes <= 4) creativity_score += 0.2;
-    }
-    creativity_score = clamp01(creativity_score);
+    // ── FACTORS 2 & 3: BEHAVIOUR + DECISION DYNAMICS (shared with the AI blend) ─
+    let { reflection_depth, self_awareness, learning_orientation, creativity_score } =
+        applyBehaviorDecisionFactors(
+            {
+                reflection_depth: baseReflection,
+                self_awareness: baseSelfAware,
+                learning_orientation: baseLearning,
+                creativity_score: baseCreativity,
+                insights: [],
+            },
+            overallMetrics
+        );
 
     // ─── TRI-FACTOR SAFEGUARD (Language + Behavior + Decision Dynamics) ──────────
     // Protects non-native / ESL students: If written text is brief (words < 15) but

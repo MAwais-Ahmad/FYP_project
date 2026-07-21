@@ -198,6 +198,10 @@ export interface CustomExamQuestion {
     correctAnswer?: string;   // MCQ letter (A–D)
     explanation?: string;
     keyPoints?: string[];     // model answer points for grading written questions
+    // Cognitive-profiling probe: a marks-free written question auto-appended to
+    // every custom exam so the 4 cognitive features can always be measured (even
+    // for a pure-MCQ paper). Excluded from marks, correctness review and skip counts.
+    probe?: boolean;
 }
 
 export interface ExamConfig {
@@ -214,6 +218,12 @@ export interface GeneratedExam {
     examTitle: string;
     totalMarks: number;
     questions: CustomExamQuestion[];
+    // Overall exam timer (set by the creator). Drives the countdown while taking.
+    durationSeconds?: number;
+    // What happens when the timer hits zero:
+    //  'auto-submit' → force-submit the exam;
+    //  'soft'        → keep going into overtime (measured as extra behavioural data).
+    timerMode?: 'auto-submit' | 'soft';
 }
 
 // Per-question grading detail returned by the server after submission.

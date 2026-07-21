@@ -14,6 +14,7 @@ import {
     calculatePerformanceScore,
     determineDifficultySignal,
     heuristicCognitiveFeatures,
+    blendCognitiveWithBehavior,
 } from '../utils/classifyLearner';
 
 // Extract the reflection free-text answer (used for implicit confidence scoring)
@@ -164,8 +165,10 @@ export function useQuizState() {
                 const accuracyScore = evaluationData.success ? evaluationData.evaluation.accuracy_score : 0.5;
                 // Hybrid pipeline: trust the LLM when it succeeds, otherwise fall
                 // back to reliable client-side heuristics instead of flat 0.5s.
+                // Tri-Factor: blend the LLM's Language scores with Behaviour +
+                // Decision Dynamics so a strong write-up is confirmed by real behaviour.
                 const cognitiveFeatures = evaluationData.success
-                    ? evaluationData.evaluation.cognitive_features
+                    ? blendCognitiveWithBehavior(evaluationData.evaluation.cognitive_features, overallMetrics)
                     : heuristicCognitiveFeatures(answers, questions, overallMetrics);
 
                 // Implicit, behaviour-driven confidence (no self-report slider)

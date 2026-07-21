@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { CustomExamQuestion, GeneratedExam, GradedQuestion, CognitiveFeatures } from '../../types/quiz.types';
 import { gradeExam } from '../../services/api';
+import { useTimer } from '../../hooks/useTimer';
 
 interface CustomQuizScreenProps {
     exam: GeneratedExam;
@@ -25,6 +26,12 @@ export interface CustomExamResults {
     cognitive?: CognitiveFeatures | null;
     mcqMarks: number;
     shortMarks: number;
+    // Real behavioural telemetry (previously hardcoded on the results screen)
+    firstInteractionTimes: Record<number, number>; // per-question latency to first input (s)
+    backtrackCount: number;                         // backward navigations to review/edit
+    autoSubmitted: boolean;                         // timer forced the submission
+    durationSeconds?: number;                       // creator-set overall limit
+    timerMode?: 'auto-submit' | 'soft';
 }
 
 export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: CustomQuizScreenProps) {
@@ -32,16 +39,32 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
     const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
     const [questionTimes, setQuestionTimes] = useState<Record<number, number>>({});
     const [revisionCounts, setRevisionCounts] = useState<Record<number, number>>({});
+    const [firstInteractionTimes, setFirstInteractionTimes] = useState<Record<number, number>>({});
+    const [backtrackCount, setBacktrackCount] = useState(0);
     const [questionStartTime, setQuestionStartTime] = useState(Date.now());
     const [quizStartTime] = useState(Date.now());
     const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
     const [isGrading, setIsGrading] = useState(false);
     const [gradeError, setGradeError] = useState('');
 
+    // Snapshot of the last committed written answer per question, used to count
+    // genuine revisions on blur (not every keystroke).
+    const writtenSnapshots = useRef<Record<number, string>>({});
+    // Guards against the overall timer and the button both submitting.
+    const submittedRef = useRef(false);
+
     const totalQuestions = exam.questions.length;
     const currentQuestion = exam.questions[currentIndex];
     const progress = ((currentIndex + 1) / totalQuestions) * 100;
     const answeredCount = Object.values(selectedAnswers).filter(v => v && v.toString().trim().length > 0).length;
+
+    // ── Overall exam timer (creator-set) ─────────────────────────────────────
+    const hasTimer = !!exam.durationSeconds && exam.durationSeconds > 0;
+    const timer = useTimer(exam.durationSeconds || 0);
+    useEffect(() => {
+        if (hasTimer) timer.start(exam.durationSeconds);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Record time when moving between questions
     const recordCurrentQuestionTime = useCallback(() => {
@@ -57,7 +80,17 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
         setQuestionStartTime(Date.now());
     }, [currentIndex]);
 
+    // Capture latency to first interaction on a question (avgTimeToStart), once.
+    const recordFirstInteraction = useCallback(() => {
+        const id = currentQuestion.id;
+        setFirstInteractionTimes(prev => {
+            if (prev[id] !== undefined) return prev;
+            return { ...prev, [id]: (Date.now() - questionStartTime) / 1000 };
+        });
+    }, [currentQuestion.id, questionStartTime]);
+
     const handleSelectAnswer = (answer: string) => {
+        recordFirstInteraction();
         const letter = answer.charAt(0);
         const prevAnswer = selectedAnswers[currentQuestion.id];
 
@@ -72,7 +105,27 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
     };
 
     const handleWrittenAnswer = (text: string) => {
+        recordFirstInteraction();
         setSelectedAnswers(prev => ({ ...prev, [currentQuestion.id]: text }));
+    };
+
+    // Count a written revision on blur when the answer meaningfully changed after
+    // having had content — mirrors MCQ answer-change tracking for text questions.
+    const handleWrittenBlur = () => {
+        const id = currentQuestion.id;
+        const current = (selectedAnswers[id] || '').trim();
+        const snapshot = writtenSnapshots.current[id];
+        if (snapshot !== undefined && snapshot.length > 0 && current.length > 0 && current !== snapshot) {
+            setRevisionCounts(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
+        }
+        writtenSnapshots.current[id] = current;
+    };
+
+    // Navigate, counting backward moves as backtracks (reviewing/editing).
+    const navigateTo = (index: number) => {
+        recordCurrentQuestionTime();
+        if (index < currentIndex) setBacktrackCount(c => c + 1);
+        setCurrentIndex(index);
     };
 
     const goToNext = () => {
@@ -83,21 +136,21 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
     };
 
     const goToPrevious = () => {
-        recordCurrentQuestionTime();
-        if (currentIndex > 0) {
-            setCurrentIndex(prev => prev - 1);
-        }
+        if (currentIndex > 0) navigateTo(currentIndex - 1);
     };
 
     const goToQuestion = (index: number) => {
-        recordCurrentQuestionTime();
-        setCurrentIndex(index);
+        navigateTo(index);
     };
 
-    const handleSubmit = async () => {
+    const handleSubmit = async (autoSubmitted = false) => {
+        if (submittedRef.current) return;
+        submittedRef.current = true;
+        timer.stop();
         recordCurrentQuestionTime();
         const totalTime = (Date.now() - quizStartTime) / 1000;
         setIsGrading(true);
+        setShowConfirmSubmit(true);
         setGradeError('');
 
         // Grade on the server: MCQs by key + written answers cumulatively via AI.
@@ -113,6 +166,8 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
 
         if (!resp.success || !resp.result) {
             setIsGrading(false);
+            submittedRef.current = false; // allow a retry
+            if (hasTimer && exam.timerMode !== 'auto-submit') timer.start(timer.timeRemaining);
             setGradeError(resp.error || 'Failed to grade exam. Please try again.');
             return;
         }
@@ -136,20 +191,47 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
             cognitive: r.cognitive,
             mcqMarks: r.mcqMarks,
             shortMarks: r.shortMarks,
+            firstInteractionTimes,
+            backtrackCount,
+            autoSubmitted,
+            durationSeconds: exam.durationSeconds,
+            timerMode: exam.timerMode,
         };
 
         setIsGrading(false);
         onComplete(results);
     };
 
+    // Auto-submit (or just stop) when the overall timer expires.
+    useEffect(() => {
+        if (!hasTimer || timer.timeRemaining > 0 || submittedRef.current) return;
+        if (exam.timerMode === 'auto-submit') {
+            handleSubmit(true);
+        }
+        // 'soft' mode: let it run into overtime; do nothing here.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [timer.timeRemaining]);
+
     const isWritten = currentQuestion.type === 'short' || currentQuestion.type === 'long';
-    const typeLabel = currentQuestion.type === 'long' ? 'Long' : currentQuestion.type === 'short' ? 'Short' : 'MCQ';
-    const typeBadgeClass = currentQuestion.type === 'long'
+    const isProbe = !!currentQuestion.probe;
+    const typeLabel = isProbe ? 'Reflection' : currentQuestion.type === 'long' ? 'Long' : currentQuestion.type === 'short' ? 'Short' : 'MCQ';
+    const typeBadgeClass = isProbe
+        ? 'bg-teal-500/20 text-teal-300'
+        : currentQuestion.type === 'long'
         ? 'bg-amber-500/20 text-amber-300'
         : currentQuestion.type === 'short'
         ? 'bg-fuchsia-500/20 text-fuchsia-300'
         : 'bg-sky-500/20 text-sky-300';
     const currentAnswer = selectedAnswers[currentQuestion.id] || '';
+
+    // Timer chip colour by remaining-time status.
+    const timerChipClass = timer.timerStatus === 'overtime'
+        ? 'bg-red-500/30 text-red-200 animate-pulse'
+        : timer.timerStatus === 'critical'
+        ? 'bg-red-500/20 text-red-300'
+        : timer.timerStatus === 'warning'
+        ? 'bg-yellow-500/20 text-yellow-300'
+        : 'bg-white/10 text-white/70';
 
     return (
         <section className="min-h-screen flex flex-col relative overflow-hidden">
@@ -167,13 +249,18 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
                             Q {currentIndex + 1} of {totalQuestions}
                         </span>
                         <span className="text-xs bg-primary-500/20 text-primary-300 px-2 py-0.5 rounded-full">
-                            {currentQuestion.marks} mark{currentQuestion.marks > 1 ? 's' : ''}
+                            {isProbe ? 'Not graded' : `${currentQuestion.marks} mark${currentQuestion.marks > 1 ? 's' : ''}`}
                         </span>
                         <span className={`text-[10px] px-2 py-0.5 rounded-full ${typeBadgeClass}`}>
                             {typeLabel}
                         </span>
                     </div>
                     <div className="flex items-center gap-3">
+                        {hasTimer && (
+                            <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full tabular-nums ${timerChipClass}`}>
+                                {timer.timerStatus === 'overtime' ? '⏱️ ' : '⏱ '}{timer.formattedTime}
+                            </span>
+                        )}
                         <span className="text-xs text-white/40">
                             {answeredCount}/{totalQuestions} answered
                         </span>
@@ -223,12 +310,17 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
                                     Question {currentIndex + 1}
                                 </span>
                                 <span className="bg-accent-500/20 text-accent-300 text-xs px-2 py-0.5 rounded-full">
-                                    {currentQuestion.marks} Mark{currentQuestion.marks > 1 ? 's' : ''}
+                                    {isProbe ? '🧠 Reflection · not graded' : `${currentQuestion.marks} Mark${currentQuestion.marks > 1 ? 's' : ''}`}
                                 </span>
                             </div>
                             <h2 className="text-lg font-semibold leading-relaxed">
                                 {currentQuestion.question}
                             </h2>
+                            {isProbe && (
+                                <p className="text-xs text-teal-300/70">
+                                    This helps us understand how you think — it doesn't affect your score.
+                                </p>
+                            )}
                         </div>
 
                         {/* Answer input: MCQ options OR written textarea */}
@@ -238,6 +330,7 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
                                     className="text-input min-h-[160px] text-sm resize-y"
                                     value={currentAnswer}
                                     onChange={(e) => handleWrittenAnswer(e.target.value)}
+                                    onBlur={handleWrittenBlur}
                                     placeholder="Type your answer here..."
                                     rows={7}
                                 />
@@ -355,7 +448,7 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
                                         ← Review
                                     </button>
                                     <button
-                                        onClick={handleSubmit}
+                                        onClick={() => handleSubmit()}
                                         className="btn-primary !py-2.5 !px-6"
                                     >
                                         ✅ Confirm Submit

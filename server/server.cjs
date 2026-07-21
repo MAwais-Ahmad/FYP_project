@@ -1203,8 +1203,29 @@ function stripExamForClient(fullExam, examId) {
       marks: q.marks,
       question: q.question,
       options: q.options || [],
+      // Preserve the profiling-probe flag so the client can render/exclude it.
+      ...(q.probe ? { probe: true } : {}),
     })),
   };
+}
+
+// ─── COGNITIVE PROFILING PROBES ───────────────────────────────────────────────
+// Marks-free written questions appended to every stored exam so the four cognitive
+// features can always be measured by the AI grader, even for a pure-MCQ paper.
+// Mirrored client-side in src/utils/cognitiveProbes.ts — keep the two in sync.
+const COGNITIVE_PROBES = [
+  { type: 'long', marks: 0, probe: true, options: [], question: 'Reflection: Looking back over this exam, which question challenged you the most and how did you work through it? What would you do differently next time?' },
+  { type: 'short', marks: 0, probe: true, options: [], question: 'When you were unsure of an answer, what did you actually do — guess, eliminate options, reason it out, or something else? How do you usually close a gap in your knowledge?' },
+  { type: 'short', marks: 0, probe: true, options: [], question: 'Pick one idea from this exam and explain how you would teach it to a friend in a clear, memorable way.' },
+];
+
+// Append probes AFTER the real questions (idempotent). Probes carry marks:0 so
+// they never affect totalMarks or the score.
+function appendCognitiveProbes(questions) {
+  if (questions.some(q => q.probe)) return questions;
+  const maxId = questions.reduce((m, q) => Math.max(m, q.id || 0), 0);
+  const probes = COGNITIVE_PROBES.map((p, i) => ({ ...p, id: maxId + 1 + i }));
+  return [...questions, ...probes];
 }
 
 const DIFFICULTY_INSTRUCTIONS = {
@@ -1330,22 +1351,24 @@ app.post('/api/generate-exam', async (req, res) => {
 
     // Merge AI-generated with the teacher's own, then group MCQ→short→long + renumber.
     const rawCombined = [...mcqRes.questions, ...shortRes.questions, ...longRes.questions, ...manual];
-    const questions = normalizeExamQuestions(rawCombined, { reorder: true });
-    if (questions.length === 0) {
+    const graded = normalizeExamQuestions(rawCombined, { reorder: true });
+    if (graded.length === 0) {
       return res.status(500).json({ success: false, error: 'No usable questions were produced. Please try again.' });
     }
+    // Append marks-free cognitive probes so the profile always has written text to score.
+    const questions = appendCognitiveProbes(graded);
 
     const fullExam = {
       examTitle: 'Generated Exam',
-      totalMarks: questions.reduce((s, q) => s + q.marks, 0),
+      totalMarks: graded.reduce((s, q) => s + q.marks, 0),
       questions,
     };
     const examId = storeExam(fullExam);
 
     totalTokensUsed += mcqRes.tokens + shortRes.tokens + longRes.tokens;
-    const mcqN = questions.filter(q => q.type === 'mcq').length;
-    const shortN = questions.filter(q => q.type === 'short').length;
-    const longN = questions.filter(q => q.type === 'long').length;
+    const mcqN = graded.filter(q => q.type === 'mcq').length;
+    const shortN = graded.filter(q => q.type === 'short').length;
+    const longN = graded.filter(q => q.type === 'long').length;
     console.log(`✅ Generated exam (${mcqN} MCQ + ${shortN} short + ${longN} long incl ${manual.length} manual, ${fullExam.totalMarks} marks, ${difficulty})`);
 
     res.json({ success: true, exam: stripExamForClient(fullExam, examId) });
@@ -1400,14 +1423,16 @@ ${text.substring(0, 12000)}`;
     }
 
     const raw = JSON.parse(content);
-    const questions = normalizeExamQuestions(raw.questions, { reorder: true });
-    if (questions.length === 0) {
+    const graded = normalizeExamQuestions(raw.questions, { reorder: true });
+    if (graded.length === 0) {
       return res.status(500).json({ success: false, error: 'No questions could be extracted from this paper. Please check the document.' });
     }
+    // Append marks-free cognitive probes so the profile always has written text to score.
+    const questions = appendCognitiveProbes(graded);
 
     const fullExam = {
       examTitle: raw.examTitle || 'Parsed Exam Paper',
-      totalMarks: questions.reduce((s, q) => s + q.marks, 0),
+      totalMarks: graded.reduce((s, q) => s + q.marks, 0),
       questions,
     };
     const examId = storeExam(fullExam);

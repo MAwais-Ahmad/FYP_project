@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { uploadPdf, generateExam, parsePaper } from '../../services/api';
 import { CustomExamQuestion, CustomQuestionType, ExamDifficulty, GeneratedExam } from '../../types/quiz.types';
+import { appendCognitiveProbes } from '../../utils/cognitiveProbes';
 
 interface AssessmentSetupScreenProps {
     onStartAIScenario: () => void;
@@ -201,9 +202,19 @@ export function AssessmentSetupScreen({
     const [showScenarioDifficulty, setShowScenarioDifficulty] = useState(false);
 
     // Route a finished custom exam either to the session (author) or the taker.
+    // Attaches the creator's timer settings and, for manual (client-owned) exams,
+    // appends the marks-free cognitive probes. AI-generated / parsed exams already
+    // carry the probes from the server (their answer key lives server-side).
     const deliverCustomExam = (exam: GeneratedExam) => {
-        if (sessionAuthor && onAuthorCustomExam) onAuthorCustomExam(exam);
-        else onStartCustomExam(exam);
+        const questions = exam.examId ? exam.questions : appendCognitiveProbes(exam.questions);
+        const finalExam: GeneratedExam = {
+            ...exam,
+            questions,
+            durationSeconds: timerEnabled ? Math.max(60, Math.round(durationMinutes * 60)) : undefined,
+            timerMode,
+        };
+        if (sessionAuthor && onAuthorCustomExam) onAuthorCustomExam(finalExam);
+        else onStartCustomExam(finalExam);
     };
 
     // Custom Paper state
@@ -239,6 +250,13 @@ export function AssessmentSetupScreen({
 
     // Exam / Subject Title state (Mandatory for tracking & AI Chatbot queries)
     const [examTitle, setExamTitle] = useState('');
+
+    // Overall exam timer (creator-set). durationMinutes drives the countdown.
+    // timerMode: 'auto-submit' force-submits at zero; 'soft' keeps going into
+    // overtime so late answers are still captured as behavioural data.
+    const [timerEnabled, setTimerEnabled] = useState(true);
+    const [durationMinutes, setDurationMinutes] = useState(20);
+    const [timerMode, setTimerMode] = useState<'auto-submit' | 'soft'>('auto-submit');
 
     // Preview state
     const [previewExam, setPreviewExam] = useState<GeneratedExam | null>(null);
@@ -409,6 +427,72 @@ export function AssessmentSetupScreen({
         (longCount + bonusLong) * longMarks;
     const genOverLimit = (mcqCount + shortCount + longCount) > MAX_TOTAL_QUESTIONS;
 
+    // Shared timer-settings card, used by both the Custom Paper and AI Material tabs.
+    const renderTimerControls = () => (
+        <div className="glass-card p-4 space-y-3 border border-accent-500/30 bg-accent-500/5">
+            <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-accent-300 uppercase tracking-wider flex items-center gap-1">
+                    <span>⏱️</span> Overall Timer
+                </label>
+                <button
+                    type="button"
+                    onClick={() => setTimerEnabled(v => !v)}
+                    className={`text-xs px-3 py-1 rounded-full transition-all ${
+                        timerEnabled ? 'bg-accent-500/30 text-accent-200' : 'bg-white/10 text-white/50'
+                    }`}
+                >
+                    {timerEnabled ? 'On' : 'Off'}
+                </button>
+            </div>
+
+            {timerEnabled && (
+                <>
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm text-white/70">Total time</span>
+                        <input
+                            type="number"
+                            min={1}
+                            max={240}
+                            value={durationMinutes}
+                            onChange={(e) => setDurationMinutes(Math.max(1, Math.min(240, Number(e.target.value) || 1)))}
+                            className="text-input text-sm w-24 text-center"
+                        />
+                        <span className="text-sm text-white/50">minutes</span>
+                    </div>
+
+                    <div>
+                        <p className="text-xs text-white/50 mb-1.5">When time runs out:</p>
+                        <div className="glass-card p-1 flex gap-1 bg-white/5">
+                            <button
+                                type="button"
+                                onClick={() => setTimerMode('auto-submit')}
+                                className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
+                                    timerMode === 'auto-submit' ? 'bg-accent-500 text-white shadow' : 'text-white/50 hover:text-white/80'
+                                }`}
+                            >
+                                🔒 Auto-submit
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setTimerMode('soft')}
+                                className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
+                                    timerMode === 'soft' ? 'bg-accent-500 text-white shadow' : 'text-white/50 hover:text-white/80'
+                                }`}
+                            >
+                                ⏳ Keep going (measure overtime)
+                            </button>
+                        </div>
+                        <p className="text-[11px] text-white/40 mt-1.5">
+                            {timerMode === 'auto-submit'
+                                ? 'The exam submits automatically the moment the timer hits zero.'
+                                : 'The timer keeps counting into overtime — the student can finish, and the extra time is recorded as behavioural data.'}
+                        </p>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+
     // ─── RENDER ──────────────────────────────────────────────────────────────────
 
     // Preview Screen (answers are intentionally NOT revealed here)
@@ -424,7 +508,7 @@ export function AssessmentSetupScreen({
                         <p className="text-white/60">{previewExam.examTitle}</p>
                         <div className="flex items-center justify-center gap-4 text-sm flex-wrap">
                             <span className="bg-primary-500/20 text-primary-300 px-3 py-1 rounded-full">
-                                {previewExam.questions.length} Questions
+                                {previewExam.questions.filter(q => !q.probe).length} Questions
                             </span>
                             <span className="bg-accent-500/20 text-accent-300 px-3 py-1 rounded-full">
                                 {previewExam.totalMarks} Total Marks
@@ -436,7 +520,7 @@ export function AssessmentSetupScreen({
                     </div>
 
                     <div className="glass-card p-5 max-h-[50vh] overflow-y-auto space-y-4">
-                        {previewExam.questions.map((q, i) => (
+                        {previewExam.questions.filter(q => !q.probe).map((q, i) => (
                             <div key={q.id} className="p-4 rounded-xl bg-white/5 border border-white/5 space-y-2">
                                 <div className="flex items-start gap-2">
                                     <span className="bg-primary-500/20 text-primary-300 text-xs px-2 py-0.5 rounded-full shrink-0 mt-0.5">
@@ -647,6 +731,8 @@ export function AssessmentSetupScreen({
                         />
                     </div>
 
+                    {renderTimerControls()}
+
                     {/* Mode Toggle */}
                     <div className="glass-card p-1 flex gap-1">
                         <button
@@ -791,6 +877,8 @@ export function AssessmentSetupScreen({
                             className="text-input text-sm font-medium"
                         />
                     </div>
+
+                    {renderTimerControls()}
 
                     {/* Material Input */}
                     <div className="space-y-4">

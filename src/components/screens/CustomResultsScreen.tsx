@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { CustomExamResults } from './CustomQuizScreen';
-import { classifyLearner, LEARNER_CATEGORIES, heuristicCognitiveFeatures, calculateDynamicConfidence } from '../../utils/classifyLearner';
+import { classifyLearner, LEARNER_CATEGORIES, heuristicCognitiveFeatures, calculateDynamicConfidence, blendCognitiveWithBehavior } from '../../utils/classifyLearner';
 import { OverallMetrics } from '../../types/quiz.types';
 import { addRecord, buildCustomRecord } from '../../utils/storage';
 import { saveRecord } from '../../services/api';
@@ -18,7 +18,15 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
         examTitle, totalMarks, obtainedMarks, percentage, totalTime, avgTimePerQuestion,
         questions, graded, selectedAnswers, questionTimes, revisionCounts, totalRevisions,
         cognitive: serverCognitive, mcqMarks, shortMarks,
+        firstInteractionTimes = {}, backtrackCount: capturedBacktracks = 0,
     } = results;
+
+    // Marks-free cognitive probes are excluded from scoring, skip counts and review.
+    const realQuestions = questions.filter(q => !q.probe);
+
+    // Reasonable per-type time budget (seconds) — used to derive a real overtimeCount
+    // now that the custom flow measures per-question time against expectations.
+    const EXPECTED_TIME: Record<string, number> = { mcq: 45, short: 120, long: 300 };
 
     const formatTime = (seconds: number) => {
         const m = Math.floor(seconds / 60);
@@ -29,11 +37,27 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
     const gradedById: Record<number, { awardedMarks: number; correct?: boolean; feedback?: string; pointsCovered?: number; totalPoints?: number }> = {};
     (graded || []).forEach(g => { gradedById[g.id] = g; });
 
-    const answeredIds = Object.entries(selectedAnswers).filter(([, v]) => v && v.toString().trim().length > 0).map(([k]) => Number(k));
-    const skippedCount = questions.length - answeredIds.length;
+    const realIds = new Set(realQuestions.map(q => q.id));
+    const answeredIds = Object.entries(selectedAnswers)
+        .filter(([k, v]) => realIds.has(Number(k)) && v && v.toString().trim().length > 0)
+        .map(([k]) => Number(k));
+    const skippedCount = realQuestions.length - answeredIds.length;
     const accuracyScore = totalMarks > 0 ? obtainedMarks / totalMarks : 0;
 
-    const hasWritten = questions.some(q => q.type === 'short' || q.type === 'long');
+    // Probes are written, so a real exam now always has written text to score.
+    const writtenQ = questions.filter(q => q.type === 'short' || q.type === 'long');
+    const hasWritten = writtenQ.length > 0;
+
+    // Real written-response volume (chars) and reflection text for confidence.
+    const totalResponseLengthVal = writtenQ.reduce((sum, q) => {
+        const a = selectedAnswers[q.id];
+        return sum + (typeof a === 'string' ? a.trim().length : 0);
+    }, 0);
+    const reflectionText = writtenQ.map(q => (selectedAnswers[q.id] || '').toString()).join(' ').trim();
+
+    // Real avgTimeToStart from captured first-interaction latencies.
+    const startVals = Object.values(firstInteractionTimes).filter(t => t >= 0);
+    const avgTimeToStartVal = startVals.length ? startVals.reduce((a, b) => a + b, 0) / startVals.length : 2.0;
 
     // Compute dynamic item-level timing metrics from questionTimes
     const times = Object.values(questionTimes);
@@ -47,7 +71,9 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
 
     const rushedCount = validTimes.filter(t => t < 15).length;
     const overthinkingVal = validTimes.filter(t => t > 60).length;
-    const overtimeVal = validTimes.filter(t => t > 90).length;
+    // Type-aware overtime: exceeded a reasonable per-type time budget (real signal
+    // now, instead of a flat 90s threshold with no timer behind it).
+    const overtimeVal = realQuestions.filter(q => (questionTimes[q.id] || 0) > (EXPECTED_TIME[q.type] || 90)).length;
 
     // Pacing trend (speeding up vs slowing down)
     let timeTrendVal: 'speeding_up' | 'slowing_down' | 'stable' = 'stable';
@@ -64,26 +90,27 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
     const overallMetrics: OverallMetrics = {
         totalTime,
         avgResponseTime: meanTime,
-        avgTimeToStart: 2.5,
+        avgTimeToStart: Math.round(avgTimeToStartVal * 100) / 100,
         timeVariance: varianceVal.toFixed(2),
         rushedDecisions: rushedCount,
         overthinkingCount: overthinkingVal,
         totalAnswerChanges: totalRevisions,
-        backtrackCount: 0,
+        backtrackCount: capturedBacktracks,
         questionsAnswered: answeredIds.length,
-        totalResponseLength: 0,
+        totalResponseLength: totalResponseLengthVal,
         skippedQuestions: skippedCount,
         overtimeCount: overtimeVal,
         timeTrend: timeTrendVal,
         decisionStyle: meanTime < 25 ? 'impulsive' : meanTime > 60 ? 'deliberate' : 'balanced',
     };
 
-    // Prefer the AI's cumulative cognitive evaluation of the WRITTEN answers.
-    // Fall back to the behavioral heuristic for pure-MCQ exams (no written text).
-    const cognitive = (hasWritten && serverCognitive)
-        ? serverCognitive
+    // Tri-Factor cognition: take the AI grader's Language-based scores (from the
+    // written/probe answers, always present now) and blend in Behaviour + Decision
+    // Dynamics. Fall back to the offline heuristic only if the grader returned none.
+    const cognitive = serverCognitive
+        ? blendCognitiveWithBehavior(serverCognitive, overallMetrics)
         : heuristicCognitiveFeatures(selectedAnswers as any, [], overallMetrics);
-    const confidence = calculateDynamicConfidence(overallMetrics, accuracyScore, '');
+    const confidence = calculateDynamicConfidence(overallMetrics, accuracyScore, reflectionText);
 
     // Full multi-dimensional classification engine call
     const categoryResult = classifyLearner({
@@ -107,7 +134,8 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
         if (savedRef.current) return;
         savedRef.current = true;
 
-        const itemizedDetails = (questions || []).map((q: any) => {
+        // Review excludes probes (they are profiling-only, not graded content).
+        const itemizedDetails = realQuestions.map((q: any) => {
             const given = selectedAnswers[q.id];
             const isMcq = q.type === 'mcq';
             const correctStr = isMcq ? q.correctAnswer : Array.isArray(q.keyPoints) ? q.keyPoints.join(', ') : '';
@@ -129,7 +157,7 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
             difficultyLevel: 5,
             avgResponseTime: meanTime,
             totalAnswerChanges: totalRevisions,
-            backtrackCount: 0,
+            backtrackCount: capturedBacktracks,
             rushedDecisions: rushedCount,
             overthinkingCount: overthinkingVal,
             timeVariance: varianceVal.toFixed(2),
@@ -138,12 +166,12 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
             performanceScore: accuracyScore,
             accuracyScore,
             cognitive,
-            avgTimeToStart: 2.5,
-            totalResponseLength: 0,
+            avgTimeToStart: overallMetrics.avgTimeToStart,
+            totalResponseLength: totalResponseLengthVal,
             skippedQuestions: skippedCount,
             overtimeCount: overtimeVal,
             answers: selectedAnswers as any,
-            questions: questions || [],
+            questions: realQuestions,
             itemizedDetails,
         }];
 
@@ -281,7 +309,7 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
                     <h2 className="text-lg font-bold">📝 Question-by-Question Review</h2>
 
                     <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-                        {questions.map((q, i) => {
+                        {realQuestions.map((q, i) => {
                             const selected = selectedAnswers[q.id];
                             const g = gradedById[q.id];
                             const awarded = g ? g.awardedMarks : 0;
