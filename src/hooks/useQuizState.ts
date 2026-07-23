@@ -204,12 +204,18 @@ export function useQuizState() {
                     questionsMetrics: qMetrics ? { ...qMetrics } : undefined,
                     itemizedDetails: questions.map(q => {
                         const given = answers[q.id];
+                        const isMcq = q.type === 'mcq';
+                        let isCorrect: boolean | undefined = undefined;
+                        if (isMcq && given != null && q.correctAnswer) {
+                            isCorrect = String(given).trim().toUpperCase() === String(q.correctAnswer).trim().toUpperCase();
+                        }
                         return {
                             id: q.id,
                             q: q.question,
                             type: q.type,
                             ans: given != null ? (Array.isArray(given) ? given.join(' | ') : String(given)) : '[No Answer]',
-                            correct: q.correctAnswer || undefined,
+                            correct: q.correctAnswer || (Array.isArray(q.keyPoints) ? q.keyPoints.join(', ') : undefined),
+                            isCorrect,
                             time: qMetrics?.[q.id]?.totalTimeSpent || 0,
                             revisions: qMetrics?.[q.id]?.answerChanges || 0,
                         };

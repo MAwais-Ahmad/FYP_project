@@ -625,7 +625,13 @@ function App() {
             {/* Global AI Diagnostic Tutor Chatbot (Only available before & after assessment, hidden during active test session) */}
             {screen !== 'quiz' && (screen as string) !== 'custom-quiz' && screen !== 'general-quiz' && (
                 <AIChatDrawer
-                    recordContext={selectedRecord || customExamResults || gResult || (scenarioResults.length > 0 ? scenarioResults[scenarioResults.length - 1] : null)}
+                    recordContext={
+                        selectedRecord ||
+                        ((screen as string) === 'custom-results' && customExamResults ? customExamResults : null) ||
+                        (scenarioResults.length > 0 ? { scenarioResults, studentName: studentName || currentUser?.name } : null) ||
+                        customExamResults ||
+                        gResult
+                    }
                 />
             )}
         </div>

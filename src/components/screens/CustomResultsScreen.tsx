@@ -134,11 +134,17 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
         if (savedRef.current) return;
         savedRef.current = true;
 
-        // Review excludes probes (they are profiling-only, not graded content).
         const itemizedDetails = realQuestions.map((q: any) => {
             const given = selectedAnswers[q.id];
             const isMcq = q.type === 'mcq';
             const correctStr = isMcq ? q.correctAnswer : Array.isArray(q.keyPoints) ? q.keyPoints.join(', ') : '';
+            const gradedInfo = gradedById[q.id];
+            let isCorrect: boolean | undefined = undefined;
+            if (gradedInfo && gradedInfo.correct !== undefined) {
+                isCorrect = gradedInfo.correct;
+            } else if (isMcq && given) {
+                isCorrect = String(given).trim().toUpperCase() === String(q.correctAnswer).trim().toUpperCase();
+            }
             return {
                 id: q.id,
                 q: q.question,
@@ -146,8 +152,9 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
                 marks: q.marks,
                 ans: given != null ? (Array.isArray(given) ? given.join(' | ') : String(given)) : '[No Answer]',
                 correct: correctStr || undefined,
-                isCorrect: isMcq && given ? String(given).trim().toUpperCase() === String(q.correctAnswer).trim().toUpperCase() : undefined,
+                isCorrect,
                 time: (questionTimes && questionTimes[q.id]) || 0,
+                feedback: gradedInfo?.feedback || undefined,
             };
         });
 

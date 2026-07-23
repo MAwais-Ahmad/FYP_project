@@ -40,6 +40,7 @@ export interface Question {
     correctAnswer?: string;
     accept?: string[];
     category?: string;
+    keyPoints?: string[];
     // Inline SVG diagram for visual/aptitude questions
     svg?: string;
 }
