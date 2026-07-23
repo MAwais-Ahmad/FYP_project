@@ -1017,13 +1017,46 @@ async function extractWithOfficeParser(buffer, { ocr, fileType } = {}) {
   }
 }
 
-// Extract text from a single uploaded file buffer (PDF/PPTX/DOCX/TXT), with an
-// OCR fallback for image-only pages. Returns { text, pageCount }.
+// OCR text extractor using OpenAI Vision for raw images (PNG, JPG, WEBP)
+async function extractImageTextWithVision(buffer, mimeType = 'image/png') {
+  try {
+    const base64 = buffer.toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+    const response = await openai.chat.completions.create({
+      model: MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Transcribe all text from this exam paper or study document accurately. Retain all question headers, numbers, options, marks, time limits, and answer keys.' },
+            { type: 'image_url', image_url: { url: dataUrl } }
+          ]
+        }
+      ],
+      max_tokens: 4000,
+    });
+    return response.choices[0]?.message?.content || '';
+  } catch (err) {
+    console.warn('⚠️ Vision OCR failed:', err.message);
+    return '';
+  }
+}
+
+// Extract text from a single uploaded file buffer (PDF/PPTX/DOCX/TXT/PNG/JPG/WEBP), with
+// Vision AI OCR fallback for images and scanned pages. Returns { text, pageCount }.
 async function extractDocumentText(originalname, buffer) {
   const filename = (originalname || '').toLowerCase();
 
   if (filename.endsWith('.txt')) {
     return { text: buffer.toString('utf8'), pageCount: 1 };
+  }
+
+  // Direct raw image support (camera photos, PNG/JPG scans, phone camera shots)
+  if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(filename)) {
+    const ext = filename.slice(filename.lastIndexOf('.') + 1).toLowerCase();
+    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', bmp: 'image/bmp', gif: 'image/gif' };
+    const text = await extractImageTextWithVision(buffer, mimeMap[ext] || 'image/png');
+    return { text, pageCount: 1 };
   }
 
   if (filename.endsWith('.pdf')) {
@@ -1930,52 +1963,167 @@ app.post('/api/chat', async (req, res) => {
 
     let formattedActiveContext = '';
     if (recordContext) {
-      // Extract compact itemized question-by-question diagnostic log
-      let itemizedSummary = '';
-      const scenarioList = recordContext.scenarioResults || recordContext.scenario_results || [];
+      let itemizedItems = [];
+
+      // Priority 1: Check scenarioResults array (e.g. multi-scenario or wrapper object)
+      const scenarioList = recordContext.scenarioResults || recordContext.scenario_results || (Array.isArray(recordContext) ? recordContext : []);
       if (Array.isArray(scenarioList) && scenarioList.length > 0) {
-        const allItemized = scenarioList.flatMap(s => s.itemizedDetails || s.itemized_details || []);
-        if (allItemized.length > 0) {
-          itemizedSummary = '\n- Itemized Question Responses:\n' + allItemized.map(item => {
-            let statusStr = item.isCorrect === true ? '✅ Correct' : item.isCorrect === false ? '❌ Incorrect' : '📝 Answered';
-            let correctStr = item.correct ? ` (Expected: "${item.correct}")` : '';
-            let timeStr = item.time ? ` [Time: ${item.time}s]` : '';
-            return `  * Q${item.id} (${item.type}): "${(item.q || '').slice(0, 70)}" -> Given: "${item.ans}" | ${statusStr}${correctStr}${timeStr}`;
-          }).join('\n');
+        itemizedItems = scenarioList.flatMap(s => s?.itemizedDetails || s?.itemized_details || []);
+      }
+
+      // Priority 2: Check itemizedDetails directly on recordContext
+      if (itemizedItems.length === 0 && Array.isArray(recordContext.itemizedDetails)) {
+        itemizedItems = recordContext.itemizedDetails;
+      }
+
+      // Priority 3: Dynamically construct from questions, selectedAnswers, and graded
+      if (itemizedItems.length === 0) {
+        const questionsList = recordContext.questions || [];
+        const gradedList = recordContext.graded || [];
+        const gradedMap = {};
+        if (Array.isArray(gradedList)) {
+          gradedList.forEach(g => { if (g && g.id != null) gradedMap[g.id] = g; });
+        }
+        const answersObj = recordContext.selectedAnswers || recordContext.answers || {};
+
+        if (Array.isArray(questionsList) && questionsList.length > 0) {
+          itemizedItems = questionsList.filter(q => !q.probe).map((q, idx) => {
+            const given = answersObj[q.id];
+            const gradedInfo = gradedMap[q.id];
+            const isMcq = q.type === 'mcq';
+            const expected = isMcq 
+              ? q.correctAnswer 
+              : (Array.isArray(q.keyPoints) ? q.keyPoints.join(', ') : (q.correctAnswer || ''));
+            
+            let isCorrect = undefined;
+            if (gradedInfo && gradedInfo.correct !== undefined) {
+              isCorrect = gradedInfo.correct;
+            } else if (isMcq && given && q.correctAnswer) {
+              isCorrect = String(given).trim().toUpperCase() === String(q.correctAnswer).trim().toUpperCase();
+            }
+
+            return {
+              id: q.id || (idx + 1),
+              q: q.question,
+              type: q.type,
+              ans: given != null ? (Array.isArray(given) ? given.join(' | ') : String(given)) : '[No Answer]',
+              correct: expected || undefined,
+              isCorrect: isCorrect,
+              feedback: gradedInfo?.feedback || undefined
+            };
+          });
         }
       }
+
+      let itemizedSummary = '';
+      if (itemizedItems.length > 0) {
+        itemizedSummary = '\n- Itemized Question Diagnostic Log:\n' + itemizedItems.map((item, idx) => {
+          let statusStr = item.isCorrect === true ? '✅ Correct' : item.isCorrect === false ? '❌ Incorrect' : '📝 Answered';
+          let correctStr = item.correct ? ` (Expected/Correct Answer: "${item.correct}")` : '';
+          let timeStr = item.time ? ` [Time: ${item.time}s]` : '';
+          let feedbackStr = item.feedback ? ` [Feedback: "${item.feedback}"]` : '';
+          const qNum = item.id || (idx + 1);
+          return `  * Q${qNum} (${item.type || 'MCQ'}): "${item.q || ''}" -> Student Answer: "${item.ans}" | ${statusStr}${correctStr}${timeStr}${feedbackStr}`;
+        }).join('\n');
+      }
+
+      const studentName = recordContext.name || recordContext.studentName || recordContext.student_name || 'Student';
+      const primaryCat = recordContext.primaryName || recordContext.primaryCategory || recordContext.primary_name || 'N/A';
+      const primaryEmoji = recordContext.primaryEmoji || recordContext.primary_emoji || '';
+      const confidence = recordContext.primaryConfidence !== undefined ? Math.round(recordContext.primaryConfidence * 100) + '%' : (recordContext.confidence !== undefined ? recordContext.confidence + '/10' : 'N/A');
+      
+      let scoreStr = 'N/A';
+      if (recordContext.obtainedMarks !== undefined && recordContext.totalMarks !== undefined) {
+        scoreStr = `${recordContext.obtainedMarks}/${recordContext.totalMarks} (${Math.round((recordContext.obtainedMarks/recordContext.totalMarks)*100)}%)`;
+      } else if (recordContext.percentage !== undefined) {
+        scoreStr = `${Math.round(recordContext.percentage)}%`;
+      } else if (recordContext.performanceScore !== undefined) {
+        scoreStr = `${Math.round(recordContext.performanceScore * 100)}%`;
+      } else if (recordContext.accuracyScore !== undefined) {
+        scoreStr = `${Math.round(recordContext.accuracyScore * 100)}%`;
+      }
+
+      const avgSpeed = recordContext.avgResponseTime || recordContext.avgTimePerQuestion || recordContext.overall?.avgResponseTime ? `${recordContext.avgResponseTime || recordContext.avgTimePerQuestion || recordContext.overall?.avgResponseTime}s avg` : 'N/A';
+      const decisionStyle = recordContext.decisionStyle || recordContext.overall?.decisionStyle || 'N/A';
+      const totalRevisions = recordContext.totalAnswerChanges ?? recordContext.totalRevisions ?? recordContext.overall?.totalAnswerChanges ?? 0;
+      const backtrackCount = recordContext.backtrackCount ?? recordContext.overall?.backtrackCount ?? 0;
+
+      // Extract cognitive sub-scores (0.0 to 1.0)
+      const cog = recordContext.cognitive || recordContext.scenarioResults?.[0]?.cognitive || recordContext.scenario_results?.[0]?.cognitive || recordContext.overall?.cognitive || {};
+      const reflectionDepthStr = cog.reflection_depth !== undefined ? `${Math.round(cog.reflection_depth * 100)}%` : 'N/A';
+      const selfAwarenessStr = cog.self_awareness !== undefined ? `${Math.round(cog.self_awareness * 100)}%` : 'N/A';
+      const learningOrientStr = cog.learning_orientation !== undefined ? `${Math.round(cog.learning_orientation * 100)}%` : 'N/A';
+      const creativityStr = cog.creativity_score !== undefined ? `${Math.round(cog.creativity_score * 100)}%` : 'N/A';
 
       formattedActiveContext = `
 
 ACTIVE ASSESSMENT CONTEXT:
-- Student Name: ${recordContext.name || recordContext.studentName || 'Student'}
-- Primary Learner Category: ${recordContext.primaryName || recordContext.primaryCategory || 'N/A'} ${recordContext.primaryEmoji || ''}
-- Category Confidence: ${recordContext.primaryConfidence ? Math.round(recordContext.primaryConfidence * 100) + '%' : 'N/A'}
-- Overall Performance / Score: ${recordContext.obtainedMarks !== undefined ? recordContext.obtainedMarks + '/' + recordContext.totalMarks : recordContext.performanceScore !== undefined ? Math.round(recordContext.performanceScore * 100) + '%' : 'N/A'}
-- Decision Speed: ${recordContext.avgResponseTime || recordContext.overall?.avgResponseTime ? (recordContext.avgResponseTime || recordContext.overall?.avgResponseTime) + 's avg' : 'N/A'}
-- Decision Style: ${recordContext.decisionStyle || recordContext.overall?.decisionStyle || 'N/A'}
-- Answer Changes / Revisions: ${recordContext.totalAnswerChanges ?? recordContext.overall?.totalAnswerChanges ?? 0}
-- Backtrack Count: ${recordContext.backtrackCount ?? recordContext.overall?.backtrackCount ?? 0}
-- Behavioral Confidence: ${recordContext.confidence !== undefined ? recordContext.confidence + '/10' : 'N/A'}${itemizedSummary}`;
+- Student Name: ${studentName}
+- Learner Profile Category: ${primaryCat} ${primaryEmoji}
+- Category Confidence: ${confidence}
+- Score / Task Accuracy: ${scoreStr}
+- Decision Speed: ${avgSpeed}
+- Decision Style: ${decisionStyle}
+- Answer Changes / Revisions: ${totalRevisions}
+- Backtracks: ${backtrackCount}
+- Cognitive Sub-Scores Breakdown:
+  * Reflection Depth: ${reflectionDepthStr}
+  * Self-Awareness & Caution: ${selfAwarenessStr}
+  * Learning Orientation (Growth Mindset): ${learningOrientStr}
+  * Creativity & Resourcefulness: ${creativityStr}${itemizedSummary}`;
     }
 
     const systemPrompt = `You are AITA Core AI — the premier Intelligent Academic & Diagnostic Assistant for the AITA Platform (Adaptive Diagnostic & Cognitive Profiler).
 
-🎯 YOUR PERSONA & RESPONSE GOALS:
-1. Highly intelligent, encouraging, concise, and structured academic mentor.
-2. EFFICIENT & ELEGANT ANSWERS: Never dump raw JSON, raw database rows, or rough unformatted text. Synthesize data into clean executive summaries, neat bullet points, bold section headers, and clear logical reasoning.
-3. EASY TO UNDERSTAND: The user must grasp what they want immediately without effort. Avoid walls of text.
+🎯 YOUR PERSONA & EXECUTIVE TONE:
+1. Speak with the precision, intelligence, authority, and sharp structure of modern top-tier LLMs (like ChatGPT / Claude).
+2. DIRECT & EXECUTIVE: Provide clear, well-structured, executive responses. Use bold key terms, clean bullet points, bold section headers, and direct logical reasoning. Avoid generic fluff or repetitive boilerplate recommendations unless specifically requested.
+3. RESILIENT TO TYPOS & IMPLICIT INTENT: Never repeat, hallucinate, or define fake concepts based on user typos (e.g., if user types "yfixed value", "tets", or "self awareness is low here are the yfixed value", recognize they mean "metric values" or their actual profile sub-scores). Map user queries directly to AITA's 17 telemetry features, cognitive dimensions, and exact test records.
 
-🧠 CORE CAPABILITIES:
-- **For Students**: Explain cognitive profiles (*Fast Learner*, *Strategic Thinker*, *Slow & Thorough*, *Steady Achiever*, *Quick & Careless*, *Inconsistent Performer*, *Concept Struggler*, *Ignorant/Avoider*). Break down why options are correct or incorrect, and suggest actionable learning strategies.
-- **For Teachers**: Summarize student results, highlight top performers vs students needing support, and explain behavioral telemetry (decision speed, revisions, backtracks, confidence calibration).
-- **Platform Knowledge**: Explain AITA features (Bloom's Taxonomy difficulty scaling, AI Scenario Generator, PDF Custom Exam Creator, behavioral telemetry tracking).
-- **STRICT GUARDRAIL**: Speak authoritatively about AITA's multi-dimensional cognitive classification engine. Never mention internal technical fallbacks or system limitations. Speak with 100% confidence.
+🗄️ AITA SYSTEM ARCHITECTURE & DATABASE SCHEMA KNOWLEDGE BASE:
+- **PostgreSQL Database Models (Prisma ORM)**:
+  * User: User accounts with roles (\`USER\`, \`STUDENT\`, \`TEACHER\`, \`SUPERVISOR\`, \`ADMIN\`), email, passwordHash, resetToken, and relations (\`records\`, \`sessions\`, \`memberships\`).
+  * Session: Test sessions created by teachers/hosts with a unique 6-character join code (e.g. "A3X7K2"), \`hostId\`, \`isActive\` status, and \`assessment\` JSONB (authored AI scenario or custom PDF exam).
+  * SessionMember: Student enrollment per session (unique \`[sessionId, userId]\`), linking student membership to their generated \`recordId\`.
+  * Record: Complete diagnostic assessment result storing student score, \`primaryCategory\`, \`primaryConfidence\`, \`confidence\` (1-10), \`decisionStyle\`, and JSONB fields: \`cognitive\` (\`reflection_depth\`, \`self_awareness\`, \`learning_orientation\`, \`creativity_score\`), \`overall\` (17 raw telemetry metrics), \`scenarioResults\` (itemized question/answer logs), and \`vark\` (visual, auditory, readWrite, kinesthetic).
+- **Core System Innovations & Solved Bottlenecks**:
+  * Prior-Knowledge / Familiarity Trap Solution: Generated scenarios use novel, fictional logic grids so students cannot rely on memorized facts, isolating pure cognitive processing.
+  * Interface Barrier / Slow Reader Trap Solution: Calibrates timing thresholds against a 10-second baseline interaction check to normalize reading speed differences.
+  * 3-Step Trojan Horse Progression: Step A (10s Baseline Latency Calibration), Step B (Multimodal Presentation Symmetry), Step C (3-Tier Context Shift: Level 1 Direct Concept, Level 2 Near Transfer, Level 3 Far Transfer).
 
-FORMATTING & STYLE RULES:
-- Start with a direct, clean answer or brief 1-sentence executive summary.
-- Use clear bullet points and bold section headers.
-- Keep responses concise unless the user explicitly asks for deep step-by-step detail.${formattedActiveContext}${databaseContextStr}`;
+🧠 AITA PLATFORM & MEASUREMENT KNOWLEDGE BASE:
+- **17 Telemetry & Cognitive Features**:
+  * avgResponseTime: Mean active decision time (s) per question.
+  * avgTimeToStart: Planning/hesitation latency (s) before first click or keypress.
+  * timeVariance: Pacing stability ratio (std dev / mean time).
+  * rushedDecisions: Count of questions submitted in < 15s (impulsivity signal).
+  * overthinkingCount: Count of questions deliberated for > 60s.
+  * totalAnswerChanges: Option revisions before finalizing an answer.
+  * backtrackCount: Backward navigations to review/re-edit previous questions.
+  * accuracyScore: Overall correctness ratio (0.0 to 1.0 or obtained/total marks).
+  * decisionStyle: Categorical archetype (impulsive [<25s avg], balanced [25-60s], deliberate [>60s]).
+  * confidence: Implicit behavioral confidence score (1-10 scale) derived automatically: Baseline 6.0 + Pacing Bonus + Low Revision Bonus + (Accuracy - 0.5)*4 + Reflection Bonus.
+  * reflection_depth (0-100%): Metacognitive depth evaluated via linguistic density on typed responses + pacing (45-90s sweet spot) + reviewing backtracks.
+  * self_awareness (0-100%): Risk caution under pressure and mistake recognition evaluated during scenario twists & reflection responses.
+  * learning_orientation (0-100%): Preference for information seeking, advice absorption, and growth mindset vs snap assumptions.
+  * creativity_score (0-100%): Resourcefulness, non-generic problem solving, and novel trade-off allocations.
+
+- **8 Diagnostic Learner Categories**:
+  * ⚡ Quick & Careless: Fast (<35s), low accuracy (<60%), rushed decisions (>1), low reflection depth (<55%).
+  * 🐢 Slow & Thorough: Deep (>80s), high accuracy, high revisions (>=3), high reflection (>50%), overthinking count.
+  * 😰 Concept Struggler: Low accuracy (<40%), low confidence (<4/10), low learning orientation (<35%), high backtracks/revisions.
+  * 🚀 Fast Learner: High accuracy (>70%), fast (<45s), high confidence (>=7/10), low revisions (<=4).
+  * 🎲 Inconsistent Performer: High pacing variance (>0.45), high revisions (>=6), accuracy fluctuating across phases.
+  * 📈 Steady Achiever: Reliable pace (35-65s), balanced accuracy (60-80%), stable pacing (<0.30 variance).
+  * 🎯 Strategic Thinker: High accuracy (>75%), high reflection (>65%), high self-awareness (>60%), high creativity (>60%).
+  * 🙈 Ignorant / Avoider: Skipped questions (>=2) or extremely fast (<20s) with low score (<25%), zero confidence penalty.
+
+RULES FOR ANSWERING USER QUESTIONS:
+1. **Explaining Scores/Metrics**: When asked why a metric (like Self-Awareness, Learning Orientation, Reflection Depth, Decision Speed, Confidence) is low or high, reference the student's EXACT numerical value from ACTIVE ASSESSMENT CONTEXT below, explain the telemetry factors that influenced it, and explain the AITA measurement formula accurately.
+2. **Explaining Database & System Architecture**: If asked about the system design, Prisma database models (\`User\`, \`Session\`, \`SessionMember\`, \`Record\`), backend telemetry extraction, or how AITA works, explain clearly and authoritatively with technical precision.
+3. **Explaining Questions (Q1, Q3, Q9, etc.)**: Always use the EXACT question text, student's submitted answer, and expected correct answer from the "Itemized Question Diagnostic Log". NEVER output placeholder brackets like "[Insert your answer]".
+4. **Teacher / Supervisor Queries**: If asked to summarize student results or compare students (e.g. "Tell me about Haris in Physics Test 1"), summarize student performance, decision style, and key behavioral telemetry clearly.
+5. **Tone & Formatting**: Start with a direct 1-2 sentence executive answer, followed by clear section headers (### Executive Summary, ### Diagnostic Breakdown, ### How AITA Measures This). Use clean markdown with bold keys.${formattedActiveContext}${databaseContextStr}`;
 
     const apiMessages = [
       { role: 'system', content: systemPrompt },
