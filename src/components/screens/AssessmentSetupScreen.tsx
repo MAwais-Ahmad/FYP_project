@@ -784,7 +784,7 @@ export function AssessmentSetupScreen({
                                 <input
                                     ref={fileInputRef}
                                     type="file"
-                                    accept=".pdf,.pptx,.ppt,.docx,.txt"
+                                    accept=".pdf,.pptx,.ppt,.docx,.txt,.png,.jpg,.jpeg,.webp,.gif,.bmp,image/*"
                                     className="hidden"
                                     onChange={(e) => {
                                         if (e.target.files && e.target.files.length) handleDocUpload(e.target.files, 'paper');
@@ -793,7 +793,7 @@ export function AssessmentSetupScreen({
                                 {isUploading ? (
                                     <div className="space-y-2">
                                         <div className="text-4xl animate-spin">⏳</div>
-                                        <p className="text-white/60">Extracting text from document...</p>
+                                        <p className="text-white/60">Extracting text & Vision-OCR from document/image...</p>
                                     </div>
                                 ) : paperFiles.length > 0 ? (
                                     <div className="space-y-2">
@@ -804,8 +804,8 @@ export function AssessmentSetupScreen({
                                 ) : (
                                     <div className="space-y-2">
                                         <div className="text-4xl">📤</div>
-                                        <p className="text-white/70 font-medium">Click to upload one exam paper</p>
-                                        <p className="text-white/40 text-xs">1 file: PDF, PowerPoint (.pptx), Word (.docx), TXT (Max 15MB)</p>
+                                        <p className="text-white/70 font-medium">Click to upload exam paper or image scan</p>
+                                        <p className="text-white/40 text-xs">1 file: PDF, Word (.docx), Image (PNG, JPG), PowerPoint, TXT (Max 15MB)</p>
                                     </div>
                                 )}
                             </div>
@@ -911,7 +911,7 @@ export function AssessmentSetupScreen({
                                 ref={materialFileRef}
                                 type="file"
                                 multiple
-                                accept=".pdf,.pptx,.ppt,.docx,.txt"
+                                accept=".pdf,.pptx,.ppt,.docx,.txt,.png,.jpg,.jpeg,.webp,.gif,.bmp,image/*"
                                 className="hidden"
                                 onChange={(e) => {
                                     if (e.target.files && e.target.files.length) handleDocUpload(e.target.files, 'material');
