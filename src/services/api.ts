@@ -212,12 +212,10 @@ export async function toggleSession(sessionId: string, isActive?: boolean): Prom
     });
 }
 
-export async function deleteSession(sessionId: string): Promise<{ success: boolean; error?: string }> {
-    return safeApiJson(`${API_BASE}/sessions/${sessionId}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-    });
-}
+// NOTE: sessions are never hard-deleted. "Deleting" a session is a per-user,
+// client-side hide (src/utils/userHiddenItems.ts) — the server always retains the
+// data. The old deleteSession() client call was removed to prevent accidental
+// destructive use; the server endpoint is now a safe no-op.
 
 // Role-aware session view (host or member): status, whether the host has created
 // the assessment yet, the caller's own progress, and (host only) all participants.

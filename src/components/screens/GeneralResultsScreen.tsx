@@ -433,7 +433,7 @@ export function GeneralResultsScreen({
                                         <th className="p-2">Q</th>
                                         <th className="p-2">Phase</th>
                                         <th className="p-2">Time Spent</th>
-                                        <th className="p-2">Time to Start</th>
+                                        <th className="p-2">Type</th>
                                         <th className="p-2">Revisions</th>
                                         <th className="p-2">Response Length</th>
                                     </tr>
@@ -448,9 +448,7 @@ export function GeneralResultsScreen({
                                                     <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs">{q.phaseName}</span>
                                                 </td>
                                                 <td className="p-2">{m.totalTimeSpent ? formatDuration(m.totalTimeSpent) : '–'}</td>
-                                                <td className="p-2">
-                                                    {m.timeToFirstInteraction ? `${m.timeToFirstInteraction.toFixed(1)}s` : '–'}
-                                                </td>
+                                                <td className="p-2"><span className="px-2 py-0.5 rounded-full bg-white/10 text-xs capitalize">{(q.type || '').replace('-', ' ') || '–'}</span></td>
                                                 <td className="p-2">{m.answerChanges || 0}</td>
                                                 <td className="p-2">{m.responseLength ? `${m.responseLength} chars` : '–'}</td>
                                             </tr>

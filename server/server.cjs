@@ -547,24 +547,23 @@ app.patch('/api/sessions/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Permanently delete a session (host-only). Cascades to SessionMembers via the
-// schema's onDelete: Cascade; student Records themselves are untouched since
-// they're independently owned by the student's User, not the session.
+// Sessions are NEVER hard-deleted server-side. "Deleting" a session is a per-user,
+// client-side hide (see src/utils/userHiddenItems.ts): it disappears only from that
+// user's dashboard while the row — and every participant's result — is retained in
+// the DB for the host and analytics. This endpoint is intentionally a no-op so the
+// "nothing is ever deleted from the database" guarantee holds even if it is called.
 app.delete('/api/sessions/:id', requireAuth, async (req, res) => {
   try {
     const session = await prisma.session.findUnique({ where: { id: req.params.id } });
     if (!session) {
       return res.status(404).json({ success: false, error: 'Session not found' });
     }
-    if (session.hostId !== req.user.id) {
-      return res.status(403).json({ success: false, error: 'Only the host can delete this session' });
-    }
-    await prisma.session.delete({ where: { id: req.params.id } });
-    console.log(`🗑️ Session deleted: ${session.code} — "${session.title}" by ${req.user.name}`);
-    res.json({ success: true });
+    // Deliberately do NOT delete. Removal is a client-side per-user hide only.
+    console.log(`ℹ️ Hard-delete disabled for session ${session.code} — soft-delete (client hide) only.`);
+    res.json({ success: true, softDeleteOnly: true });
   } catch (error) {
-    console.error('❌ Session delete error:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to delete session' });
+    console.error('❌ Session delete (no-op) error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to process request' });
   }
 });
 

@@ -278,16 +278,6 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
                                 </div>
                             ))}
                         </div>
-                        {serverCognitive.insights && serverCognitive.insights.length > 0 && (
-                            <ul className="text-xs text-white/60 space-y-1 pt-2 border-t border-white/10">
-                                {serverCognitive.insights.map((ins, i) => (
-                                    <li key={i} className="flex items-start gap-2">
-                                        <span className="text-primary-400">•</span>
-                                        <span>{ins}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
                     </div>
                 )}
 

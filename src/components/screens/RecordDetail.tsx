@@ -233,7 +233,7 @@ export function RecordDetail({ record, onBack }: RecordDetailProps) {
                                                 <th className="p-2">Q</th>
                                                 <th className="p-2">Phase</th>
                                                 <th className="p-2">Time Spent</th>
-                                                <th className="p-2">Time to Start</th>
+                                                <th className="p-2">Type</th>
                                                 <th className="p-2">Revisions</th>
                                                 <th className="p-2">Response Length</th>
                                             </tr>
@@ -248,9 +248,7 @@ export function RecordDetail({ record, onBack }: RecordDetailProps) {
                                                             <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs">{q.phaseName || q.phase}</span>
                                                         </td>
                                                         <td className="p-2">{m.totalTimeSpent ? formatDuration(m.totalTimeSpent) : '–'}</td>
-                                                        <td className="p-2">
-                                                            {m.timeToFirstInteraction ? `${m.timeToFirstInteraction.toFixed(1)}s` : '–'}
-                                                        </td>
+                                                        <td className="p-2"><span className="px-2 py-0.5 rounded-full bg-white/10 text-xs capitalize">{(q.type || '').replace('-', ' ') || '–'}</span></td>
                                                         <td className="p-2">{m.answerChanges || 0}</td>
                                                         <td className="p-2">{m.responseLength ? `${m.responseLength} chars` : '–'}</td>
                                                     </tr>
@@ -306,18 +304,6 @@ export function RecordDetail({ record, onBack }: RecordDetailProps) {
                 </div>
             )}
 
-            {/* AI Insights (if available) */}
-            {record.cognitive?.insights && record.cognitive.insights.length > 0 && (
-                <div className="glass-card p-5 space-y-2">
-                    <p className="text-xs uppercase tracking-widest text-white/40">AI Insights</p>
-                    {record.cognitive.insights.map((insight, i) => (
-                        <p key={i} className="text-sm text-white/60 flex items-start gap-2">
-                            <span className="text-primary-400 mt-0.5">→</span>
-                            {insight}
-                        </p>
-                    ))}
-                </div>
-            )}
         </section>
     );
 }
