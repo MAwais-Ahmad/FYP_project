@@ -6,6 +6,7 @@ interface RecordBlockProps {
     onClick: () => void;
     showName?: boolean;
     status?: 'completed' | 'in-progress';
+    onDelete?: () => void;
 }
 
 function fmtDate(iso: string): string {
@@ -20,7 +21,7 @@ function fmtDate(iso: string): string {
     }
 }
 
-export function RecordBlock({ record, onClick, showName = false, status }: RecordBlockProps) {
+export function RecordBlock({ record, onClick, showName = false, status, onDelete }: RecordBlockProps) {
     const category = LEARNER_CATEGORIES[record.primaryCategory];
     const perfPct = Math.round(record.performanceScore * 100);
     const accPct = Math.round(record.accuracyScore * 100);
@@ -29,7 +30,7 @@ export function RecordBlock({ record, onClick, showName = false, status }: Recor
     return (
         <button
             onClick={onClick}
-            className="w-full glass-card p-4 flex items-center gap-4 hover:bg-white/10 transition-all duration-200 cursor-pointer group text-left"
+            className="w-full glass-card p-4 flex items-center gap-4 hover:bg-white/10 transition-all duration-200 cursor-pointer group text-left relative"
         >
             {/* Category Icon */}
             <div
@@ -80,16 +81,32 @@ export function RecordBlock({ record, onClick, showName = false, status }: Recor
                 </div>
             </div>
 
-            {/* Chevron */}
-            <svg
-                className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                strokeWidth={2}
-            >
-                <path d="M9 5l7 7-7 7" />
-            </svg>
+            {/* Delete button or Chevron */}
+            {onDelete ? (
+                <button
+                    type="button"
+                    title="Remove from my dashboard view"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete();
+                    }}
+                    className="p-2 text-white/30 hover:text-red-400 hover:bg-white/10 rounded-lg transition-all shrink-0 z-10"
+                >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                </button>
+            ) : (
+                <svg
+                    className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2}
+                >
+                    <path d="M9 5l7 7-7 7" />
+                </svg>
+            )}
         </button>
     );
 }

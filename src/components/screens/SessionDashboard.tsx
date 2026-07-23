@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { getSessionView, getSessionAssessment, toggleSession, deleteSession, AuthUser } from '../../services/api';
+import { getSessionView, getSessionAssessment, toggleSession, AuthUser } from '../../services/api';
 import { StudentRecord } from '../../utils/storage';
 import { RecordBlock } from '../ui/RecordBlock';
+import { hideSessionForUser } from '../../utils/userHiddenItems';
 
 interface SessionDashboardProps {
     sessionId: string;
@@ -144,9 +145,9 @@ export function SessionDashboard({
         if (!session) return;
         setIsDeleting(true);
         setDeleteError('');
-        const result = await deleteSession(session.id);
-        if (result.success) onBack();
-        else { setDeleteError(result.error || 'Failed to delete session'); setIsDeleting(false); }
+        hideSessionForUser(user.id || user.name, session.id);
+        setIsDeleting(false);
+        onBack();
     };
 
     const openPreview = async () => {
@@ -219,15 +220,13 @@ export function SessionDashboard({
                             {session.isActive ? '🟢 Active' : '🔴 Closed'}
                         </span>
                         {isHost && (
-                            <>
-                                <button onClick={handleToggleSession} className="btn-secondary !py-1.5 !px-3 text-xs">
-                                    {session.isActive ? 'Close Session' : 'Reopen Session'}
-                                </button>
-                                <button onClick={() => setShowDeleteConfirm(true)} className="btn-secondary !py-1.5 !px-3 text-xs !text-red-400 hover:!bg-red-500/10">
-                                    🗑️ Delete
-                                </button>
-                            </>
+                            <button onClick={handleToggleSession} className="btn-secondary !py-1.5 !px-3 text-xs">
+                                {session.isActive ? 'Close Session' : 'Reopen Session'}
+                            </button>
                         )}
+                        <button onClick={() => setShowDeleteConfirm(true)} className="btn-secondary !py-1.5 !px-3 text-xs !text-red-400 hover:!bg-red-500/10">
+                            🗑️ Delete
+                        </button>
                     </div>
                 </div>
 
@@ -442,17 +441,15 @@ export function SessionDashboard({
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
                     <div className="glass-card max-w-md w-full p-8 text-center space-y-5 border border-red-500/20 shadow-2xl">
                         <div className="text-5xl">🗑️</div>
-                        <h2 className="text-xl font-bold">Delete "{session.title}"?</h2>
+                        <h2 className="text-xl font-bold">Remove "{session.title}"?</h2>
                         <p className="text-sm text-white/60">
-                            This permanently deletes the session, its join code ({session.code}), and its assessment.
-                            {members.length > 0 && <> {members.length} participant{members.length > 1 ? 's' : ''} will lose access, though their own completed results stay on their personal dashboards.</>}
-                            {' '}This can't be undone.
+                            This will remove the session from your personal dashboard view. The session and all student results remain safely stored in the database for analytics.
                         </p>
                         {deleteError && <p className="text-red-400 text-sm">⚠️ {deleteError}</p>}
                         <div className="flex gap-3 justify-center">
                             <button onClick={() => setShowDeleteConfirm(false)} disabled={isDeleting} className="btn-secondary !py-2.5 !px-5 disabled:opacity-50">Cancel</button>
                             <button onClick={handleDeleteSession} disabled={isDeleting} className="btn-primary !py-2.5 !px-6 !bg-red-500 hover:!bg-red-600 disabled:opacity-50">
-                                {isDeleting ? 'Deleting...' : '🗑️ Delete Permanently'}
+                                {isDeleting ? 'Removing...' : '🗑️ Remove from Dashboard'}
                             </button>
                         </div>
                     </div>

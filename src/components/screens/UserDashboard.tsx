@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { AuthUser, listSessions, joinSession, createSession, fetchRecordsByName, SessionData } from '../../services/api';
 import { StudentRecord } from '../../utils/storage';
 import { RecordBlock } from '../ui/RecordBlock';
+import { hideRecordForUser, hideSessionForUser, isRecordHiddenForUser, isSessionHiddenForUser } from '../../utils/userHiddenItems';
 
 interface UserDashboardProps {
     user: AuthUser;
@@ -30,6 +31,8 @@ export function UserDashboard({
     const [isJoining, setIsJoining] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
 
+    const userKey = user.id || user.name;
+
     useEffect(() => {
         // Fetch user's solo records
         fetchRecordsByName(user.name)
@@ -56,7 +59,8 @@ export function UserDashboard({
                         overall: dbRec.overall,
                         scenarioResults: dbRec.scenarioResults,
                     }));
-                    setRecords(mapped.sort((a, b) => b.date.localeCompare(a.date)));
+                    const visible = mapped.filter(r => !isRecordHiddenForUser(userKey, r.id));
+                    setRecords(visible.sort((a, b) => b.date.localeCompare(a.date)));
                 }
             })
             .catch(() => {});
@@ -65,12 +69,14 @@ export function UserDashboard({
         listSessions()
             .then((data) => {
                 if (data.success) {
-                    setHostedSessions(data.hosted || []);
-                    setJoinedSessions(data.joined || []);
+                    const visibleHosted = (data.hosted || []).filter((s: SessionData) => !isSessionHiddenForUser(userKey, s.id));
+                    const visibleJoined = (data.joined || []).filter((s: SessionData) => !isSessionHiddenForUser(userKey, s.id));
+                    setHostedSessions(visibleHosted);
+                    setJoinedSessions(visibleJoined);
                 }
             })
             .catch(() => {});
-    }, [user.name]);
+    }, [user.name, userKey]);
 
     const handleJoinSession = async () => {
         if (!joinCode.trim()) return;
@@ -84,8 +90,10 @@ export function UserDashboard({
                 // Refresh sessions
                 const data = await listSessions();
                 if (data.success) {
-                    setHostedSessions(data.hosted || []);
-                    setJoinedSessions(data.joined || []);
+                    const visibleHosted = (data.hosted || []).filter((s: SessionData) => !isSessionHiddenForUser(userKey, s.id));
+                    const visibleJoined = (data.joined || []).filter((s: SessionData) => !isSessionHiddenForUser(userKey, s.id));
+                    setHostedSessions(visibleHosted);
+                    setJoinedSessions(visibleJoined);
                 }
             } else {
                 setJoinError(result.error || 'Could not join session');
@@ -116,6 +124,17 @@ export function UserDashboard({
         } finally {
             setIsCreating(false);
         }
+    };
+
+    const handleDeleteRecord = (recordId: string) => {
+        hideRecordForUser(userKey, recordId);
+        setRecords(prev => prev.filter(r => r.id !== recordId));
+    };
+
+    const handleDeleteSession = (sessionId: string) => {
+        hideSessionForUser(userKey, sessionId);
+        setHostedSessions(prev => prev.filter(s => s.id !== sessionId));
+        setJoinedSessions(prev => prev.filter(s => s.id !== sessionId));
     };
 
     return (
@@ -189,47 +208,61 @@ export function UserDashboard({
                                 Hosted by me
                             </h3>
                             {hostedSessions.map((s) => (
-                                <button
-                                    key={s.id}
-                                    onClick={() => onViewSession(s.id)}
-                                    className="w-full glass-card p-4 flex items-center gap-4 hover:bg-white/10 transition-all cursor-pointer group text-left"
-                                >
-                                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-lg font-bold shrink-0">
-                                        {s.code?.slice(0, 2)}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="font-semibold truncate">{s.title}</div>
-                                        <div className="text-xs text-white/40 flex items-center gap-2">
-                                            <span className="font-mono bg-white/10 px-1.5 py-0.5 rounded">
-                                                {s.code}
-                                            </span>
-                                            <span>•</span>
-                                            <span>
-                                                {s.members?.length || 0} participant
-                                                {(s.members?.length || 0) !== 1 ? 's' : ''}
-                                            </span>
-                                            <span>•</span>
-                                            <span
-                                                className={
-                                                    s.isActive
-                                                        ? 'text-green-400'
-                                                        : 'text-red-400'
-                                                }
-                                            >
-                                                {s.isActive ? '🟢 Active' : '🔴 Closed'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <svg
-                                        className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors shrink-0"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                        strokeWidth={2}
+                                <div key={s.id} className="relative group">
+                                    <button
+                                        onClick={() => onViewSession(s.id)}
+                                        className="w-full glass-card p-4 flex items-center gap-4 hover:bg-white/10 transition-all cursor-pointer text-left pr-12"
                                     >
-                                        <path d="M9 5l7 7-7 7" />
-                                    </svg>
-                                </button>
+                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-lg font-bold shrink-0">
+                                            {s.code?.slice(0, 2)}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-semibold truncate">{s.title}</div>
+                                            <div className="text-xs text-white/40 flex items-center gap-2">
+                                                <span className="font-mono bg-white/10 px-1.5 py-0.5 rounded">
+                                                    {s.code}
+                                                </span>
+                                                <span>•</span>
+                                                <span>
+                                                    {s.members?.length || 0} participant
+                                                    {(s.members?.length || 0) !== 1 ? 's' : ''}
+                                                </span>
+                                                <span>•</span>
+                                                <span
+                                                    className={
+                                                        s.isActive
+                                                            ? 'text-green-400'
+                                                            : 'text-red-400'
+                                                    }
+                                                >
+                                                    {s.isActive ? '🟢 Active' : '🔴 Closed'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <svg
+                                            className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors shrink-0"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                            strokeWidth={2}
+                                        >
+                                            <path d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="Remove session from my dashboard view"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteSession(s.id);
+                                        }}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-white/30 hover:text-red-400 hover:bg-white/10 rounded-lg transition-all z-10"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
                             ))}
                         </div>
                     )}
@@ -240,34 +273,48 @@ export function UserDashboard({
                                 Joined
                             </h3>
                             {joinedSessions.map((s) => (
-                                <button
-                                    key={s.id}
-                                    onClick={() => onViewSession(s.id)}
-                                    className="w-full glass-card p-4 flex items-center gap-4 hover:bg-white/10 transition-all cursor-pointer group text-left"
-                                >
-                                    <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center text-lg font-bold shrink-0">
-                                        {s.code?.slice(0, 2)}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="font-semibold truncate">{s.title}</div>
-                                        <div className="text-xs text-white/40 flex items-center gap-2">
-                                            <span>Hosted by {s.host?.name || 'Unknown'}</span>
-                                            <span>•</span>
-                                            <span className="font-mono bg-white/10 px-1.5 py-0.5 rounded">
-                                                {s.code}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <svg
-                                        className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors shrink-0"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                        strokeWidth={2}
+                                <div key={s.id} className="relative group">
+                                    <button
+                                        onClick={() => onViewSession(s.id)}
+                                        className="w-full glass-card p-4 flex items-center gap-4 hover:bg-white/10 transition-all cursor-pointer text-left pr-12"
                                     >
-                                        <path d="M9 5l7 7-7 7" />
-                                    </svg>
-                                </button>
+                                        <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center text-lg font-bold shrink-0">
+                                            {s.code?.slice(0, 2)}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-semibold truncate">{s.title}</div>
+                                            <div className="text-xs text-white/40 flex items-center gap-2">
+                                                <span>Hosted by {s.host?.name || 'Unknown'}</span>
+                                                <span>•</span>
+                                                <span className="font-mono bg-white/10 px-1.5 py-0.5 rounded">
+                                                    {s.code}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <svg
+                                            className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors shrink-0"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                            strokeWidth={2}
+                                        >
+                                            <path d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="Remove session from my dashboard view"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteSession(s.id);
+                                        }}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-white/30 hover:text-red-400 hover:bg-white/10 rounded-lg transition-all z-10"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
                             ))}
                         </div>
                     )}
@@ -304,6 +351,7 @@ export function UserDashboard({
                                 key={record.id}
                                 record={record}
                                 onClick={() => onViewRecord(record)}
+                                onDelete={() => handleDeleteRecord(record.id)}
                             />
                         ))}
                     </div>
