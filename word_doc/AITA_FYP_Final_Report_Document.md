@@ -1,4 +1,4 @@
-# AITA: Adaptive Diagnostic & Cognitive Profiling Engine
+# AITA(AI Teacher Assistant): an ai driven cognitive learning style detection system
 ## Final Year Project Technical Report & Documentation
 
 ---
@@ -27,7 +27,8 @@ Existing learning management systems (LMS) and computer-based testing (CBT) engi
 
 ## 1.4 Objectives
 * **Develop a 17-Feature Telemetry Pipeline**: Automatically capture millisecond timing, behavioral hesitation, revision frequencies, navigation backtracks, and open-ended text volume during test execution.
-* **Engineer the 3-Step "Trojan Horse" Assessment Framework**: Implement a 10-second interaction baseline calibration (to normalize reading speeds), multimodal presentation symmetry, and a 3-tier context shift progression (Direct Concept $\rightarrow$ Near Transfer $\rightarrow$ Far Transfer).
+* **quiz generating engine**:  Generating quizzes based on the user's input. 
+
 * **Classify 8 Diagnostic Behavioral Categories**: Train a hybrid rule-based and heuristic machine learning classifier to categorize students into *Quick but Careless*, *Slow but Thorough*, *Concept Struggler*, *Fast Learner*, *Inconsistent Performer*, *Steady Achiever*, *Strategic Thinker*, and *Ignorant / Avoider*.
 * **Build an Intelligent AI Advisor Chatbot**: Implement an interactive assistant with full PostgreSQL schema context, 3-tier itemized question log reconstruction, typo resilience, and executive-level diagnostic explanation capabilities.
 * **Implement User-Specific Soft-Delete Functionality**: Allow individual students and teachers to clean their personal dashboard views without deleting underlying assessment data from PostgreSQL, preserving institutional data integrity.
@@ -346,6 +347,7 @@ The classification decision logic was tested across all 8 archetype combinations
 | **V4** | 30s | 90% | 1 | 0 | `fast_learner` | ✅ Pass |
 | **V5** | 45s | 75% | 2 | 0 | `steady_achiever` | ✅ Pass |
 | **V6** | 12s | 15% | 0 | 3 | `ignorant_avoider` | ✅ Pass |
+
 
 ## 7.3 Traceability Matrix
 
