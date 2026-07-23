@@ -1,0 +1,143 @@
+================================================================================
+EXAM PAPER: CS301 - Artificial Intelligence & Cognitive Systems
+Total Duration / Time Allowed: 60 Minutes (3600 Seconds)
+Total Marks: 50 Marks
+Difficulty: Normal to Advanced
+================================================================================
+
+INSTRUCTIONS:
+1. Answer all questions in Section A, Section B, and Section C.
+2. Marks and recommended timing for each question are indicated in brackets.
+3. For Multiple Choice Questions, select the single best option (A, B, C, or D).
+
+--------------------------------------------------------------------------------
+SECTION A: MULTIPLE CHOICE QUESTIONS (10 Questions | Total: 20 Marks)
+Recommended Time: 15 Minutes (90 seconds per question)
+--------------------------------------------------------------------------------
+
+Q1. [Marks: 2 | Time: 90s] Which search algorithm guarantees finding the shortest path in an unweighted graph structure?
+A) Depth-First Search (DFS)
+B) Breadth-First Search (BFS)
+C) Greedy Best-First Search
+D) Hill Climbing Search
+Correct Answer: B
+Explanation: Breadth-First Search (BFS) explores nodes level by level, guaranteeing the shortest path in unweighted graphs.
+
+Q2. [Marks: 2 | Time: 90s] In machine learning overfitting occurs primarily when:
+A) The model generalizes exceptionally well to unseen test datasets.
+B) The training dataset is too large for the network parameters.
+C) The model learns noise and specific details of the training data instead of general patterns.
+D) The learning rate is set to zero during backpropagation.
+Correct Answer: C
+Explanation: Overfitting occurs when a model captures random noise in training data, degrading test accuracy.
+
+Q3. [Marks: 2 | Time: 90s] What is the primary purpose of an Activation Function in Artificial Neural Networks (ANN)?
+A) To multiply weight matrices by bias values.
+B) To introduce non-linearity enabling the network to learn complex non-linear decision boundaries.
+C) To store training labels inside input neurons.
+D) To prevent gradient descent from updating node weights.
+Correct Answer: B
+Explanation: Non-linear activation functions (like ReLU or Sigmoid) allow neural networks to approximate complex non-linear functions.
+
+Q4. [Marks: 2 | Time: 90s] Which heuristic search algorithm uses both cost-so-far g(n) and estimated-cost-to-goal h(n)?
+A) Uniform Cost Search
+B) Depth-Limited Search
+C) A* Search Algorithm
+D) Alpha-Beta Pruning
+Correct Answer: C
+Explanation: A* algorithm evaluates nodes using f(n) = g(n) + h(n), combining actual path cost and heuristic estimate.
+
+Q5. [Marks: 2 | Time: 90s] In natural language processing, Transformer architectures rely primarily on which mechanism?
+A) Recurrent hidden loops
+B) Self-Attention Mechanism
+C) Convolutional pooling kernels
+D) Markov chain state transitions
+Correct Answer: B
+Explanation: Transformers use self-attention to capture contextual dependencies across all tokens simultaneously without recurrence.
+
+Q6. [Marks: 2 | Time: 90s] What does Precision measure in a classification model evaluation?
+A) The proportion of true positive predictions out of all actual positive instances.
+B) The proportion of true positive predictions out of all positive predictions made by the model.
+C) The overall accuracy across all classes combined.
+D) The ratio of false positives to true negatives.
+Correct Answer: B
+Explanation: Precision = TP / (TP + FP), measuring exactness of positive class predictions.
+
+Q7. [Marks: 2 | Time: 90s] Which optimization algorithm dynamically adjusts the learning rate using first and second moments of gradients?
+A) Stochastic Gradient Descent (SGD)
+B) Adam Optimizer
+C) Batch Gradient Descent
+D) Newton-Raphson Method
+Correct Answer: B
+Explanation: Adam computes adaptive learning rates for each parameter using exponentially decaying averages of past gradients and squared gradients.
+
+Q8. [Marks: 2 | Time: 90s] What is the key advantage of Convolutional Layers in Image Recognition tasks?
+A) Parameter sharing and spatial locality invariance
+B) Complete absence of hyperparameter tuning
+C) Eliminating the need for training labels in supervised learning
+D) Unlimited memory storage per pixel layer
+Correct Answer: A
+Explanation: Convolutional layers use weight sharing and preserve spatial relationships between neighboring pixels.
+
+Q9. [Marks: 2 | Time: 90s] Reinforcement Learning agents learn optimal behavior through:
+A) Pre-labeled input-output pairs provided by human annotators.
+B) Unsupervised cluster centroid optimization.
+C) Trial-and-error interaction with an environment using rewards and penalties.
+D) Static decision tree rules generated offline.
+Correct Answer: C
+Explanation: RL agents interact with environments to maximize cumulative reward over time through policy exploration.
+
+Q10. [Marks: 2 | Time: 90s] What does the vanishing gradient problem in deep networks cause?
+A) Weights in early layers update extremely slowly or stop learning altogether.
+B) Model loss becomes negative during gradient descent updates.
+C) Training data is automatically deleted during epoch iteration.
+D) Output probabilities sum to greater than 1.0.
+Correct Answer: A
+Explanation: Vanishing gradients cause backpropagated errors to exponentially diminish towards input layers, halting learning in deep architectures.
+
+--------------------------------------------------------------------------------
+SECTION B: SHORT ANSWER QUESTIONS (4 Questions | Total: 20 Marks)
+Recommended Time: 25 Minutes (approx. 6 Minutes per question)
+--------------------------------------------------------------------------------
+
+Q11. [Marks: 5 | Time: 360s]
+Question: Differentiate between Supervised, Unsupervised, and Reinforcement Learning paradigms. Provide one real-world application example for each.
+Key Points:
+- Supervised Learning uses labeled data (input-output pairs) for training e.g., spam email detection.
+- Unsupervised Learning works on unlabeled data to discover hidden structures/clusters e.g., customer segmentation.
+- Reinforcement Learning trains agents via trial-and-error using reward/penalty feedback e.g., autonomous driving or game AI (AlphaGo).
+
+Q12. [Marks: 5 | Time: 360s]
+Question: Explain the concept of Bias-Variance Tradeoff in machine learning model evaluation and how it affects model generalization.
+Key Points:
+- High Bias leads to underfitting where the model is overly simplistic and fails to capture dataset complexity.
+- High Variance leads to overfitting where the model captures noise in training data and fails to generalize to test data.
+- The optimal model minimizes total error by balancing bias and variance to achieve strong generalization on unseen data.
+
+Q13. [Marks: 5 | Time: 360s]
+Question: Describe how Alpha-Beta Pruning optimizes the Minimax decision algorithm in two-player game trees.
+Key Points:
+- Minimax evaluates game states by maximizing own score and minimizing opponent's optimal response.
+- Alpha-Beta Pruning eliminates (prunes) branches that cannot influence the final decision.
+- Pruning significantly reduces the search tree nodes evaluated without changing the final optimal move choice.
+
+Q14. [Marks: 5 | Time: 360s]
+Question: Explain the role of Loss Functions and Backpropagation in training deep neural networks.
+Key Points:
+- Loss Function measures the discrepancy between predicted model output and actual target values.
+- Backpropagation uses the chain rule of calculus to compute loss gradients with respect to each weight.
+- Gradient descent updates network weights in the opposite direction of gradients to minimize total loss.
+
+--------------------------------------------------------------------------------
+SECTION C: COMPREHENSIVE / LONG ANSWER QUESTION (1 Question | Total: 10 Marks)
+Recommended Time: 20 Minutes
+--------------------------------------------------------------------------------
+
+Q15. [Marks: 10 | Time: 1200s]
+Question: Design a real-time AI-based Diagnostic System for automated Medical Image Analysis (e.g., detecting chest X-ray abnormalities). Discuss the end-to-end architecture including data preprocessing, model selection, loss functions, evaluation metrics, and handling model uncertainty in clinical settings.
+Key Points:
+- Data Preprocessing: Normalization, resizing, data augmentation (rotation, contrast adjustment) to handle class imbalance.
+- Architecture Selection: Convolutional Neural Network (e.g., ResNet/EfficientNet) or Vision Transformer (ViT) for spatial feature extraction.
+- Loss & Training: Binary Cross-Entropy or Focal Loss to address severe class imbalance in rare diseases.
+- Evaluation Metrics: Focus on Precision, Sensitivity/Recall (minimizing false negatives), ROC-AUC, and F1-Score instead of plain accuracy.
+- Clinical Reliability & Explainability: Use Grad-CAM / saliency maps to visualize model focus areas and Monte Carlo Dropout for confidence/uncertainty estimation.
