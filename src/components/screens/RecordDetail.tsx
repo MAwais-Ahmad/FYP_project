@@ -283,33 +283,24 @@ export function RecordDetail({ record, onBack }: RecordDetailProps) {
                         <span className="text-xs text-white/40">🎯 {primary.focusArea}</span>
                     </div>
 
-                    {/* YouTube row */}
+                    {/* Recommended videos to improve in this category — click to open on YouTube */}
                     <div className="grid md:grid-cols-2 gap-3">
-                        {primary.youtubeTopics.map((t, i) => (
-                            <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
+                        {primary.youtubeVideos.map((v, i) => (
+                            <a
+                                key={i}
+                                href={v.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all"
+                            >
                                 <div className="w-16 h-11 rounded-lg bg-gradient-to-br from-red-500/40 to-rose-600/40 flex items-center justify-center text-lg shrink-0">
                                     ▶
                                 </div>
                                 <div className="min-w-0">
-                                    <p className="text-sm font-medium leading-snug">{t}</p>
-                                    <p className="text-xs text-white/40 flex items-center gap-1">📺 YouTube</p>
+                                    <p className="text-sm font-medium leading-snug">{v.title}</p>
+                                    <p className="text-xs text-white/40 flex items-center gap-1">📺 Watch on YouTube ↗</p>
                                 </div>
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* AI sessions row */}
-                    <div className="grid md:grid-cols-2 gap-3">
-                        {primary.aiSessionTopics.map((t, i) => (
-                            <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
-                                <div className="w-11 h-11 rounded-lg bg-gradient-to-br from-primary-500/40 to-accent-500/40 flex items-center justify-center text-lg shrink-0">
-                                    🤖
-                                </div>
-                                <div className="min-w-0">
-                                    <p className="text-sm font-medium leading-snug">AI Session: {t}</p>
-                                    <p className="text-xs text-white/40">Interact with our AI tutor to refine your skills.</p>
-                                </div>
-                            </div>
+                            </a>
                         ))}
                     </div>
                 </div>

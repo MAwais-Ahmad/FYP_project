@@ -20,8 +20,7 @@ export const LEARNER_CATEGORIES: Record<
         description: string;
         pattern: string[];
         solutionType: 'lacking' | 'excelling' | 'growth';
-        youtubeTopics: string[];
-        aiSessionTopics: string[];
+        youtubeVideos: { title: string; url: string }[];
         focusArea: string;
         color: string; // tailwind gradient classes
     }
@@ -39,15 +38,10 @@ export const LEARNER_CATEGORIES: Record<
             'Higher rushed decision count',
         ],
         solutionType: 'lacking',
-        youtubeTopics: [
-            'Accuracy improvement techniques',
-            '"Think before you answer" decision frameworks',
-            'Slow thinking vs fast thinking (Daniel Kahneman)',
-        ],
-        aiSessionTopics: [
-            'Timed accuracy drills with instant feedback',
-            'Double-check practice exercises',
-            'Error pattern analysis sessions',
+        youtubeVideos: [
+            { title: 'How to Avoid Making Careless Errors in Exams', url: 'https://www.youtube.com/watch?v=Vmp2FAtHMrg' },
+            { title: 'Exam Technique & Avoiding Silly Mistakes', url: 'https://www.youtube.com/watch?v=bUbLTbSR1AY' },
+            { title: 'How to STOP Making Silly Mistakes in Your Exams', url: 'https://www.youtube.com/watch?v=S5OW4ZkFtnw' },
         ],
         focusArea: 'Slow down and verify answers before submitting',
         color: 'from-amber-500 to-orange-500',
@@ -66,15 +60,10 @@ export const LEARNER_CATEGORIES: Record<
             'High overthinking count',
         ],
         solutionType: 'lacking',
-        youtubeTopics: [
-            'Speed reading and quick decision techniques',
-            'Confidence building under pressure',
-            'Trusting your gut instinct',
-        ],
-        aiSessionTopics: [
-            'Timed challenge exercises (beat the clock)',
-            '"Trust your first instinct" practice rounds',
-            'Rapid-fire decision scenarios',
+        youtubeVideos: [
+            { title: '5 Ways to Manage Your Time in an Exam', url: 'https://www.youtube.com/watch?v=H7z-h6Udvsk' },
+            { title: 'Top Time Management Tips for Exams', url: 'https://www.youtube.com/watch?v=Eo_frFijI8g' },
+            { title: 'How to Handle Exam Pressure and Stress', url: 'https://www.youtube.com/watch?v=QMy3TGBzfPQ' },
         ],
         focusArea: 'Build speed while maintaining your natural thoroughness',
         color: 'from-blue-500 to-cyan-500',
@@ -93,15 +82,10 @@ export const LEARNER_CATEGORIES: Record<
             'Low learning orientation score',
         ],
         solutionType: 'lacking',
-        youtubeTopics: [
-            'Foundational concept explanations with visuals',
-            'Step-by-step problem solving guides',
-            'How to break down complex decisions',
-        ],
-        aiSessionTopics: [
-            'Guided practice with fully worked examples',
-            'Basics review with real-world analogies',
-            'Concept-building step-by-step sessions',
+        youtubeVideos: [
+            { title: 'Ace Your Exams with Active Recall (Evidence-Based)', url: 'https://www.youtube.com/watch?v=fFB81-e_arE' },
+            { title: 'The Feynman Technique: Learn Anything Faster', url: 'https://www.youtube.com/watch?v=3_7qk6SeEzU' },
+            { title: 'How to Study for Exams — Spaced Repetition', url: 'https://www.youtube.com/watch?v=Z-zNHHpXoMM' },
         ],
         focusArea: 'Master fundamentals before moving to complex problems',
         color: 'from-rose-500 to-pink-500',
@@ -120,15 +104,10 @@ export const LEARNER_CATEGORIES: Record<
             'Strong cognitive adaptation',
         ],
         solutionType: 'excelling',
-        youtubeTopics: [
-            'Advanced topic explorations and enrichment materials',
-            'Real-world case study breakdowns',
-            'Leadership and strategic thinking',
-        ],
-        aiSessionTopics: [
-            'Complex multi-variable problem challenges',
-            'Teaching and mentorship simulation exercises',
-            'Leadership decision-making scenarios',
+        youtubeVideos: [
+            { title: 'The Feynman Technique: Learn Anything Faster', url: 'https://www.youtube.com/watch?v=3_7qk6SeEzU' },
+            { title: 'Deliberate Practice: Achieve Mastery in Anything', url: 'https://www.youtube.com/watch?v=1-sjUoGO250' },
+            { title: 'How to Learn Any Skill Twice as Fast', url: 'https://www.youtube.com/watch?v=FbD8n4J_MuM' },
         ],
         focusArea: 'Stay engaged with harder problems and mentorship opportunities',
         color: 'from-emerald-500 to-teal-500',
@@ -147,15 +126,10 @@ export const LEARNER_CATEGORIES: Record<
             'High answer change count',
         ],
         solutionType: 'lacking',
-        youtubeTopics: [
-            'Stress management for students',
-            'Test anxiety reduction techniques',
-            'Focus and concentration exercises',
-        ],
-        aiSessionTopics: [
-            'Consistent routine practice sessions',
-            'Mindfulness and calm decision-making exercises',
-            'Pressure simulation with reflection',
+        youtubeVideos: [
+            { title: 'Worried About Your Next Test? Try This', url: 'https://www.youtube.com/watch?v=osEQHlitnQg' },
+            { title: 'How to Handle Exam Pressure and Stress', url: 'https://www.youtube.com/watch?v=QMy3TGBzfPQ' },
+            { title: '5 Ways to Manage Your Time in an Exam', url: 'https://www.youtube.com/watch?v=H7z-h6Udvsk' },
         ],
         focusArea: 'Build stable performance through regular structured practice',
         color: 'from-purple-500 to-violet-500',
@@ -174,15 +148,10 @@ export const LEARNER_CATEGORIES: Record<
             'Low time variance',
         ],
         solutionType: 'growth',
-        youtubeTopics: [
-            'Goal-setting techniques for students',
-            'Breaking performance plateaus',
-            'Incremental challenge strategies',
-        ],
-        aiSessionTopics: [
-            'Stretch exercises beyond your comfort zone',
-            'Skill progression challenges with increasing difficulty',
-            'Harder problem variations of familiar scenarios',
+        youtubeVideos: [
+            { title: 'Deliberate Practice: Achieve Mastery in Anything', url: 'https://www.youtube.com/watch?v=1-sjUoGO250' },
+            { title: 'Practice More Efficiently — Deliberate Practice', url: 'https://www.youtube.com/watch?v=aIPS4ugcanM' },
+            { title: 'How to Learn Any Skill Twice as Fast', url: 'https://www.youtube.com/watch?v=FbD8n4J_MuM' },
         ],
         focusArea: 'Gradually increase difficulty to reach the next performance level',
         color: 'from-sky-500 to-indigo-500',
@@ -201,15 +170,10 @@ export const LEARNER_CATEGORIES: Record<
             'Deep reflections',
         ],
         solutionType: 'excelling',
-        youtubeTopics: [
-            'Creative problem-solving frameworks',
-            'Systems thinking and mental models',
-            'Leadership development and executive decision-making',
-        ],
-        aiSessionTopics: [
-            'Multi-step complex real-world problems',
-            'Strategic planning challenges',
-            'Team leadership and conflict resolution simulations',
+        youtubeVideos: [
+            { title: '3 CEO Mental Models for Better Critical Thinking', url: 'https://www.youtube.com/watch?v=faHDFJD6i0U' },
+            { title: 'A Critical Thinking Model', url: 'https://www.youtube.com/watch?v=icv-BBtNpEU' },
+            { title: 'Critical Thinking: Does It Matter? (TEDx)', url: 'https://www.youtube.com/watch?v=OZJThuYWUOM' },
         ],
         focusArea: 'Take on leadership roles, mentor others, and tackle ambitious projects',
         color: 'from-fuchsia-500 to-purple-500',
@@ -228,15 +192,10 @@ export const LEARNER_CATEGORIES: Record<
             'Zero or minimal reflection',
         ],
         solutionType: 'lacking',
-        youtubeTopics: [
-            '"The Cost of Doing Nothing" (Documentary/Case Study)',
-            'Why ignoring problems makes them exponentially worse',
-            'Funny compilation: When procrastinating goes completely wrong',
-        ],
-        aiSessionTopics: [
-            'Low-stakes "guess the answer" games',
-            'Building confidence through easy wins',
-            'Time management: breaking paralysis',
+        youtubeVideos: [
+            { title: 'My #1 Method for Stopping Procrastination', url: 'https://www.youtube.com/watch?v=H0k0TQfZGSc' },
+            { title: '6 Steps to Stop Procrastinating Now', url: 'https://www.youtube.com/watch?v=ilwork_mktE' },
+            { title: 'The Science Behind Why You Procrastinate', url: 'https://www.youtube.com/watch?v=7DvftaHlZR0' },
         ],
         focusArea: 'Attempt every question, even if you are unsure',
         color: 'from-gray-500 to-slate-700',

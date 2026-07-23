@@ -309,75 +309,6 @@ export function GeneralResultsScreen({
                 </div>
             </div>
 
-            {/* ── VARK SENSORY PREFERENCE CHART ──────────────────────────────── */}
-            {latest?.vark && (
-                <div className="glass-card p-6 space-y-4">
-                    <h3 className="font-semibold text-sm uppercase tracking-wide text-white/70 flex items-center gap-2">
-                        🎧 Sensory Learning Style (VARK)
-                    </h3>
-                    <p className="text-xs text-white/50 leading-relaxed max-w-xl">
-                        Estimated from how you actually performed across the question formats in this test — diagram questions (Visual), typed answers and word problems (Read/Write), language &amp; recall questions (Auditory proxy), and applied problem-solving with hands-on experimentation (Kinesthetic).
-                    </p>
-                    <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6 pt-2">
-                        {/* Visual */}
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs font-semibold text-white/70">
-                                <span className="flex items-center gap-1.5">🎥 Visual (Video/Images)</span>
-                                <span>{Math.round(latest.vark.visual * 100)}%</span>
-                            </div>
-                            <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
-                                <div 
-                                    className="h-full rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 transition-all duration-1000" 
-                                    style={{ width: `${latest.vark.visual * 100}%` }}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Auditory */}
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs font-semibold text-white/70">
-                                <span className="flex items-center gap-1.5">🎧 Auditory (Sound/Voice)</span>
-                                <span>{Math.round(latest.vark.auditory * 100)}%</span>
-                            </div>
-                            <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
-                                <div 
-                                    className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-1000" 
-                                    style={{ width: `${latest.vark.auditory * 100}%` }}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Read/Write */}
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs font-semibold text-white/70">
-                                <span className="flex items-center gap-1.5">📝 Read/Write (Text/Docs)</span>
-                                <span>{Math.round(latest.vark.readWrite * 100)}%</span>
-                            </div>
-                            <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
-                                <div 
-                                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-1000" 
-                                    style={{ width: `${latest.vark.readWrite * 100}%` }}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Kinesthetic */}
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs font-semibold text-white/70">
-                                <span className="flex items-center gap-1.5">🛠️ Kinesthetic (Hands-on)</span>
-                                <span>{Math.round(latest.vark.kinesthetic * 100)}%</span>
-                            </div>
-                            <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
-                                <div 
-                                    className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-1000" 
-                                    style={{ width: `${latest.vark.kinesthetic * 100}%` }}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* ── PERSONALIZED RECOMMENDATIONS ───────────────────────────────── */}
             {primary && (
                 <div className="glass-card p-6 space-y-4">
@@ -388,33 +319,24 @@ export function GeneralResultsScreen({
                         <span className="text-xs text-white/40">🎯 {primary.focusArea}</span>
                     </div>
 
-                    {/* YouTube row */}
+                    {/* Recommended videos to improve in this category — click to open on YouTube */}
                     <div className="grid md:grid-cols-2 gap-3">
-                        {primary.youtubeTopics.map((t, i) => (
-                            <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
+                        {primary.youtubeVideos.map((v, i) => (
+                            <a
+                                key={i}
+                                href={v.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all"
+                            >
                                 <div className="w-16 h-11 rounded-lg bg-gradient-to-br from-red-500/40 to-rose-600/40 flex items-center justify-center text-lg shrink-0">
                                     ▶
                                 </div>
                                 <div className="min-w-0">
-                                    <p className="text-sm font-medium leading-snug">{t}</p>
-                                    <p className="text-xs text-white/40 flex items-center gap-1">📺 YouTube</p>
+                                    <p className="text-sm font-medium leading-snug">{v.title}</p>
+                                    <p className="text-xs text-white/40 flex items-center gap-1">📺 Watch on YouTube ↗</p>
                                 </div>
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* AI sessions row */}
-                    <div className="grid md:grid-cols-2 gap-3">
-                        {primary.aiSessionTopics.map((t, i) => (
-                            <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
-                                <div className="w-11 h-11 rounded-lg bg-gradient-to-br from-primary-500/40 to-accent-500/40 flex items-center justify-center text-lg shrink-0">
-                                    🤖
-                                </div>
-                                <div className="min-w-0">
-                                    <p className="text-sm font-medium leading-snug">AI Session: {t}</p>
-                                    <p className="text-xs text-white/40">Interact with our AI tutor to refine your skills.</p>
-                                </div>
-                            </div>
+                            </a>
                         ))}
                     </div>
                 </div>
