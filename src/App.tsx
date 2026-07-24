@@ -71,6 +71,7 @@ function App() {
         gAnswers,
         gResult,
         gStudentName,
+        gGenerating,
         startGeneralQuiz,
         completeGeneralQuiz,
         setGeneralAnswer,
@@ -161,10 +162,12 @@ function App() {
     };
 
     // ── GENERAL APTITUDE QUIZ (self-contained flow) ───────────────────────────
-    const handleStartGeneralQuiz = () => {
+    const handleStartGeneralQuiz = async () => {
         resetMetrics();
         startMetrics();
-        startGeneralQuiz(currentUser?.name || 'Anonymous');
+        // AI-generates the test (with local fallback); gGenerating drives the
+        // loading overlay. Only switch screens once the questions are ready.
+        await startGeneralQuiz(currentUser?.name || 'Anonymous');
         setScreen('general-quiz');
     };
 
@@ -278,7 +281,7 @@ function App() {
             // stays set so the resulting record links back to this session.
             resetMetrics();
             startMetrics();
-            startGeneralQuiz(currentUser?.name || 'Anonymous');
+            await startGeneralQuiz(currentUser?.name || 'Anonymous');
             setScreen('general-quiz');
         } else {
             setSessionError('This assessment type is not supported.');
@@ -409,6 +412,17 @@ function App() {
 
     return (
         <div className="app-container min-h-screen">
+            {/* General Aptitude Test — AI generation loading overlay */}
+            {gGenerating && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
+                    <div className="glass-card max-w-md w-full p-8 text-center space-y-4 border border-white/10 shadow-2xl">
+                        <div className="text-5xl animate-spin">🧠</div>
+                        <h2 className="text-xl font-bold">Generating your aptitude test…</h2>
+                        <p className="text-white/60 text-sm">The AI is crafting a fresh set of reasoning questions. This takes a few seconds.</p>
+                    </div>
+                </div>
+            )}
+
             {/* Mid-Quiz Disconnect Warning Overlay */}
             {isOffline && screen === 'quiz' && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6 animate-fadeIn">

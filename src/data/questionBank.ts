@@ -7,6 +7,7 @@
 import { Question, Scenario } from '../types/quiz.types';
 import { COMPASS_SVG, FIG, figureSeriesSvg, questionKey } from './svgFigures';
 import { generateQuestions } from './questionGenerators';
+import { generateAptitudeTest, AiAptitudeQuestion } from '../services/api';
 
 export type BankCategory = 'math' | 'verbal' | 'logical' | 'gk' | 'visual' | 'psych';
 
@@ -22,6 +23,9 @@ export interface BankQuestion {
     accept?: string[]; // text only: other accepted answers
     hint?: string;
     svg?: string;
+    // Optional fine-grained display label (e.g. "Blood Relations"). Falls back to
+    // the coarse category name when absent.
+    displayName?: string;
 }
 
 const CATEGORY_NAMES: Record<BankCategory, string> = {
@@ -36,6 +40,28 @@ const CATEGORY_NAMES: Record<BankCategory, string> = {
 const TIME_BY_TYPE: Record<string, number> = { mcq: 45, text: 75, 'multi-text': 150 };
 const VISUAL_TIME = 60;
 const PSYCH_TEXT_TIME = 120; // open-ended reflection needs more time than a short answer
+
+// Display labels for the AI reasoning-category slugs (used as the on-screen
+// "phase" name). Anything unknown falls back to the coarse category name.
+const APTITUDE_LABELS: Record<string, string> = {
+    // AI semantic-reasoning categories
+    'analogies': 'Analogies',
+    'odd-one-out': 'Odd One Out',
+    'classification': 'Classification',
+    'syllogism': 'Logical Deduction',
+    'statement-conclusion': 'Statement & Conclusion',
+    'cause-effect': 'Cause & Effect',
+    'assumptions': 'Statement & Assumption',
+    'logical-consistency': 'Logical Consistency',
+    'reflection': 'Problem Solving & Reflection',
+};
+
+// Map a fine AI slug into the coarse BankCategory used by grading + VARK.
+function coarseCategory(slug: string): BankCategory {
+    if (slug === 'reflection') return 'psych';
+    if (slug === 'analogies' || slug === 'odd-one-out' || slug === 'classification') return 'verbal';
+    return 'logical';
+}
 
 // ─── THE BANK ────────────────────────────────────────────────────────────────
 
@@ -333,14 +359,26 @@ const BANK: BankQuestion[] = [
 
 // ─── TEST BUILDER ────────────────────────────────────────────────────────────
 
-/** Number of questions drawn from each category (total = 12). */
+// Hybrid test shape (total = 12):
+//   • 3 AI semantic-reasoning MCQs  (analogies, syllogisms, deduction …)
+//   • 4 local formula-based MCQs    (number/letter series, coding, direction … — always correct)
+//   • 3 AI open-ended reflection questions (written)
+//   • 2 local visual diagram puzzles (AI can't draw SVGs)
+// General Knowledge removed by request.
+const APTITUDE_AI_MCQ_COUNT = 3;
+const APTITUDE_LOCAL_MCQ_COUNT = 4;
+const APTITUDE_MCQ_COUNT = APTITUDE_AI_MCQ_COUNT + APTITUDE_LOCAL_MCQ_COUNT; // 7 total MCQ
+const APTITUDE_WRITTEN_COUNT = 3; // open-ended reflection questions
+const APTITUDE_VISUAL_COUNT = 2;  // locally-generated diagram puzzles
+
+/** Local-fallback quota per category (total = 12). GK removed. */
 const QUOTA: Record<BankCategory, number> = {
     math: 0, // mathematical questions removed by request
-    logical: 2,
+    logical: APTITUDE_MCQ_COUNT - 1, // 6
     verbal: 1,
-    visual: 3,
-    gk: 2,
-    psych: 4,
+    visual: APTITUDE_VISUAL_COUNT,   // 2
+    gk: 0, // general knowledge removed by request
+    psych: APTITUDE_WRITTEN_COUNT,   // 3
 };
 
 export const TOTAL_TEST_QUESTIONS = Object.values(QUOTA).reduce((a, b) => a + b, 0);
@@ -387,18 +425,144 @@ function pushRecentTest(keys: string[]): void {
  * GK and open-ended questions stay curated.
  */
 const GENERATED_PER_CATEGORY: Record<BankCategory, number> = {
-    visual: 2,
+    visual: APTITUDE_VISUAL_COUNT,
     math: 0,
-    logical: 1,
+    logical: 4,
     verbal: 1,
     gk: 0,
     psych: 0, // open-ended prompts are curated, not templated
 };
 
-export function buildTest(): { scenario: Scenario; questions: Question[] } {
+// Shuffle a 4-option MCQ (stripping any "A) " labels) and re-derive the correct
+// letter, so option order is unpredictable across attempts.
+function shuffleMcqOptions(options: string[], correctLetter: string): { options: string[]; correctAnswer: string } {
+    const clean = options.map(o => String(o).replace(/^\s*[A-Za-z]\)\s*/, '').trim());
+    const correctIdx = (correctLetter || 'A').toUpperCase().charCodeAt(0) - 65;
+    const correctText = clean[correctIdx] ?? clean[0];
+    const shuffled = shuffle(clean);
+    const newIdx = Math.max(0, shuffled.indexOf(correctText));
+    return {
+        options: shuffled.map((t, i) => `${String.fromCharCode(65 + i)}) ${t}`),
+        correctAnswer: String.fromCharCode(65 + newIdx),
+    };
+}
+
+// Turn a picked list of bank/AI/visual questions into the final quiz shape +
+// scenario, shuffling order and recording recency. Shared by both build paths.
+function finalizeTest(pickedRaw: BankQuestion[]): { scenario: Scenario; questions: Question[] } {
+    const picked = shuffle(pickedRaw);
+    pushRecentTest(picked.map(q => questionKey(q.question, q.svg)));
+
+    const questions: Question[] = picked.map((q, i) => ({
+        id: i + 1,
+        phase: i + 1,
+        phaseName: q.displayName ?? CATEGORY_NAMES[q.category],
+        type: q.type,
+        timeLimit:
+            q.category === 'psych'
+                ? (q.type === 'multi-text' ? TIME_BY_TYPE['multi-text'] : PSYCH_TEXT_TIME)
+                : q.svg ? VISUAL_TIME : TIME_BY_TYPE[q.type] ?? 45,
+        question: q.question,
+        hint: q.hint ?? (q.category === 'psych'
+            ? 'There is no right or wrong answer — we are interested in HOW you think, so explain your reasoning.'
+            : undefined),
+        options: q.options,
+        category: q.category,
+        svg: q.svg,
+        correctAnswer: q.correctAnswer,
+        accept: q.accept,
+    }));
+
+    const totalTimeLimit = questions.reduce((s, q) => s + q.timeLimit, 0);
+
+    const scenario: Scenario = {
+        title: '🧠 Aptitude & Thinking Assessment',
+        description:
+            `A single mixed test of ${questions.length} questions covering logical & cognitive reasoning, verbal reasoning, visual (diagram) puzzles and open-ended problem-solving & reflection. Questions are AI-generated fresh — every attempt is different.`,
+        context_details:
+            `• ${questions.length} questions — answer all of them\n• Mostly reasoning MCQs, a few diagram puzzles, and ${APTITUDE_WRITTEN_COUNT} open-ended written questions\n• Open-ended questions have no right answer — they earn their mark through a genuine, thought-out attempt\n• You can move back and forth between questions\n• Your result dashboard is shown right after you submit`,
+        constraint: 'Answer every question — unanswered questions count against your marks.',
+        urgency: `Finish before the timer runs out (${Math.round(totalTimeLimit / 60)} minutes total).`,
+        totalTimeLimit,
+    };
+
+    return { scenario, questions };
+}
+
+// Pick `n` open-ended reflection (psych) prompts from the curated bank, preferring
+// ones not seen recently — used to top up if the AI returns too few written Qs.
+function localReflectionQuestions(n: number, recent: Set<string>): BankQuestion[] {
+    if (n <= 0) return [];
+    const pool = BANK.filter(q => q.category === 'psych' && q.type === 'text');
+    const byRecency = [
+        ...shuffle(pool.filter(q => !recent.has(questionKey(q.question)))),
+        ...shuffle(pool.filter(q => recent.has(questionKey(q.question)))),
+    ];
+    return byRecency.slice(0, n);
+}
+
+// ── HYBRID BUILD (primary) ───────────────────────────────────────────────────
+// AI (gpt-4o) generates the CREATIVE semantic-reasoning MCQs + open-ended
+// reflection questions; local FORMULA generators produce the exact-answer puzzles
+// (number/letter series, coding, direction, blood-relations …) so those are always
+// correctly keyed; local visual puzzles are mixed in. Everything is shuffled. If
+// the AI call fails, we simply backfill entirely from local generators/bank.
+export async function buildTest(): Promise<{ scenario: Scenario; questions: Question[] }> {
     const recent = new Set(getRecentKeys());
-    let picked: BankQuestion[] = [];
+
+    let aiMcqs: BankQuestion[] = [];
+    let aiWritten: BankQuestion[] = [];
+    try {
+        const res = await generateAptitudeTest(APTITUDE_AI_MCQ_COUNT, APTITUDE_WRITTEN_COUNT);
+        if (res.success && Array.isArray(res.questions)) {
+            for (const q of res.questions) {
+                const mapped = aiToBankQuestion(q);
+                if (mapped.type === 'text') aiWritten.push(mapped);
+                else aiMcqs.push(mapped);
+            }
+        }
+    } catch {
+        /* network / AI failure — everything backfills from local below */
+    }
+
+    // Objective MCQs: local formula generators fill whatever the AI didn't supply,
+    // always keeping the total MCQ count at APTITUDE_MCQ_COUNT.
+    const localMcqNeeded = Math.max(0, APTITUDE_MCQ_COUNT - aiMcqs.length);
+    const localMcqs = generateQuestions('logical', localMcqNeeded, recent);
+
+    // Written: prefer the AI reflections, top up from the bank if short.
+    const writtenNeeded = Math.max(0, APTITUDE_WRITTEN_COUNT - aiWritten.length);
+    const localWritten = localReflectionQuestions(writtenNeeded, recent);
+
+    // Visual diagram puzzles are always local (AI can't draw SVGs).
+    const visual = generateQuestions('visual', APTITUDE_VISUAL_COUNT, recent);
+
+    const all = [...aiMcqs, ...localMcqs, ...aiWritten.slice(0, APTITUDE_WRITTEN_COUNT), ...localWritten, ...visual];
+    if (all.filter(q => q.type === 'mcq').length === 0) return buildLocalTest();
+    return finalizeTest(all);
+}
+
+// Convert one AI question into the internal BankQuestion shape (with a display
+// label and, for MCQs, shuffled options + re-derived correct letter).
+function aiToBankQuestion(q: AiAptitudeQuestion): BankQuestion {
+    const category = coarseCategory(q.category);
+    const displayName = APTITUDE_LABELS[q.category] ?? CATEGORY_NAMES[category];
+    if (q.type === 'mcq' && Array.isArray(q.options) && q.options.length >= 2) {
+        const { options, correctAnswer } = shuffleMcqOptions(q.options, q.correctAnswer || 'A');
+        return { category, type: 'mcq', question: q.question, options, correctAnswer, displayName };
+    }
+    // Written / reflection: open-ended, no correct answer.
+    return { category: 'psych', type: 'text', question: q.question, displayName: APTITUDE_LABELS['reflection'] };
+}
+
+// ── LOCAL BUILD (fallback) ───────────────────────────────────────────────────
+// The original curated-bank + procedural-generator builder, used when the AI
+// generation is unavailable so the test always works offline.
+export function buildLocalTest(): { scenario: Scenario; questions: Question[] } {
+    const recent = new Set(getRecentKeys());
+    const picked: BankQuestion[] = [];
     (Object.keys(QUOTA) as BankCategory[]).forEach(cat => {
+        if (QUOTA[cat] <= 0) return;
         // Fresh real-time generated questions first (avoiding recent output)
         const generated = generateQuestions(cat, Math.min(GENERATED_PER_CATEGORY[cat], QUOTA[cat]), recent);
         picked.push(...generated);
@@ -423,43 +587,7 @@ export function buildTest(): { scenario: Scenario; questions: Question[] } {
         }
     });
 
-    picked = shuffle(picked);
-    pushRecentTest(picked.map(q => questionKey(q.question, q.svg)));
-
-    const questions: Question[] = picked.map((q, i) => ({
-        id: i + 1,
-        phase: i + 1,
-        phaseName: CATEGORY_NAMES[q.category],
-        type: q.type,
-        timeLimit:
-            q.category === 'psych'
-                ? (q.type === 'multi-text' ? TIME_BY_TYPE['multi-text'] : PSYCH_TEXT_TIME)
-                : q.svg ? VISUAL_TIME : TIME_BY_TYPE[q.type] ?? 45,
-        question: q.question,
-        hint: q.hint ?? (q.category === 'psych'
-            ? 'There is no right or wrong answer — we are interested in HOW you think, so explain your reasoning.'
-            : undefined),
-        options: q.options,
-        category: q.category,
-        svg: q.svg,
-        correctAnswer: q.correctAnswer,
-        accept: q.accept,
-    }));
-
-    const totalTimeLimit = questions.reduce((s, q) => s + q.timeLimit, 0);
-
-    const scenario: Scenario = {
-        title: '🧠 Aptitude & Thinking Assessment',
-        description:
-            `A single mixed test of ${TOTAL_TEST_QUESTIONS} questions covering problem-solving & reflection, general knowledge, logical reasoning, verbal reasoning and visual (diagram) puzzles. Questions are randomly selected — every attempt is different.`,
-        context_details:
-            `• ${TOTAL_TEST_QUESTIONS} questions — answer all of them\n• Mix of multiple-choice, written and diagram-based questions\n• Open-ended questions have no right answer — they earn their mark through a genuine, thought-out attempt\n• You can move back and forth between questions\n• Your result dashboard is shown right after you submit`,
-        constraint: 'Answer every question — unanswered questions count against your marks.',
-        urgency: `Finish before the timer runs out (${Math.round(totalTimeLimit / 60)} minutes total).`,
-        totalTimeLimit,
-    };
-
-    return { scenario, questions };
+    return finalizeTest(picked);
 }
 
 // ─── GRADING ─────────────────────────────────────────────────────────────────

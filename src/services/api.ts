@@ -391,6 +391,30 @@ export async function gradeExam(payload: {
     });
 }
 
+// A single AI-generated aptitude question (before it's mapped into the quiz shape).
+export interface AiAptitudeQuestion {
+    type: 'mcq' | 'text';
+    category: string;            // reasoning-category slug, or "reflection" for written
+    difficulty?: 'easy' | 'medium' | 'hard';
+    question: string;
+    options?: string[];          // MCQ only: ["A) …","B) …","C) …","D) …"]
+    correctAnswer?: string;      // MCQ only: letter A–D
+    solution?: string;
+}
+
+// Freshly AI-generate the General Aptitude Test (logical/cognitive MCQs + written
+// reflection prompts). The client mixes in local visual puzzles and grades locally.
+export async function generateAptitudeTest(
+    mcqCount: number,
+    writtenCount: number
+): Promise<{ success: boolean; questions?: AiAptitudeQuestion[]; error?: string }> {
+    return safeApiJson(`${API_BASE}/generate-aptitude`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ mcqCount, writtenCount }),
+    });
+}
+
 export async function parsePaper(text: string): Promise<{ success: boolean; exam?: any; error?: string }> {
     return safeApiJson(`${API_BASE}/parse-paper`, {
         method: 'POST',

@@ -25,20 +25,30 @@ export function useGeneralQuiz() {
     const [gResult, setGResult] = useState<ScenarioResult | null>(null);
     const [gStudentName, setGStudentName] = useState('');
     const [gLoading, setGLoading] = useState(false);
+    const [gGenerating, setGGenerating] = useState(false); // true while AI builds the test
 
     const gTotal = gQuestions.length;
     const gIsFirst = gCurrentIndex === 0;
     const gIsLast = gCurrentIndex === gTotal - 1;
 
-    // Build a fresh randomized test and reset all per-test state.
-    const startGeneralQuiz = useCallback((name?: string) => {
+    // Build a fresh AI-generated test (with local fallback) and reset all
+    // per-test state. Async because generation calls the server.
+    const startGeneralQuiz = useCallback(async (name?: string) => {
         if (name !== undefined) setGStudentName(name);
         setGAnswers({});
         setGCurrentIndex(0);
         setGResult(null);
-        const test = buildTest();
-        setGScenario(test.scenario);
-        setGQuestions(test.questions);
+        setGScenario(null);
+        setGQuestions([]);
+        setGGenerating(true);
+        try {
+            const test = await buildTest();
+            setGScenario(test.scenario);
+            setGQuestions(test.questions);
+            return test;
+        } finally {
+            setGGenerating(false);
+        }
     }, []);
 
     // Grade locally, derive cognitive features + VARK, store the result.
@@ -161,6 +171,7 @@ export function useGeneralQuiz() {
         gResult,
         gStudentName,
         gLoading,
+        gGenerating,
         gTotal,
         gIsFirst,
         gIsLast,
