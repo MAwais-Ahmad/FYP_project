@@ -51,23 +51,24 @@ async function callHighPrecisionAI(params) {
   throw new Error('No working AI API key available for high-precision tasks');
 }
 
-// ─── CHATBOT ENGINE: Primary = OpenRouter Free Tier ($0 cost), Fallback = OpenAI
+// ─── CHATBOT ENGINE: Primary = OpenAI (gpt-4o-mini) for accurate, concise,
+// diagnostic answers; Fallback = OpenRouter (used only if OpenAI is unavailable).
 async function callChatbotAI(params) {
-  if (openrouterClient) {
+  if (openaiClient) {
     try {
-      return await openrouterClient.chat.completions.create({
+      return await openaiClient.chat.completions.create({
         ...params,
-        model: OPENROUTER_MODEL,
+        model: OPENAI_MODEL,
       });
     } catch (err) {
-      console.warn(`⚠️ Primary OpenRouter (${OPENROUTER_MODEL}) failed: ${err.message}. Falling back to OpenAI (${OPENAI_MODEL})...`);
+      console.warn(`⚠️ Primary OpenAI (${OPENAI_MODEL}) failed: ${err.message}. Falling back to OpenRouter (${OPENROUTER_MODEL})...`);
     }
   }
 
-  if (openaiClient) {
-    return await openaiClient.chat.completions.create({
+  if (openrouterClient) {
+    return await openrouterClient.chat.completions.create({
       ...params,
-      model: OPENAI_MODEL,
+      model: OPENROUTER_MODEL,
     });
   }
 
@@ -2122,7 +2123,8 @@ RULES FOR ANSWERING USER QUESTIONS:
 2. **Explaining Database & System Architecture**: If asked about the system design, Prisma database models (\`User\`, \`Session\`, \`SessionMember\`, \`Record\`), backend telemetry extraction, or how AITA works, explain clearly and authoritatively with technical precision.
 3. **Explaining Questions (Q1, Q3, Q9, etc.)**: Always use the EXACT question text, student's submitted answer, and expected correct answer from the "Itemized Question Diagnostic Log". NEVER output placeholder brackets like "[Insert your answer]".
 4. **Teacher / Supervisor Queries**: If asked to summarize student results or compare students (e.g. "Tell me about Haris in Physics Test 1"), summarize student performance, decision style, and key behavioral telemetry clearly.
-5. **Tone & Formatting**: Start with a direct 1-2 sentence executive answer, followed by clear section headers (### Executive Summary, ### Diagnostic Breakdown, ### How AITA Measures This). Use clean markdown with bold keys.${formattedActiveContext}${databaseContextStr}`;
+5. **Tone & Formatting — BE CONCISE**: Lead with a direct answer in 1-3 sentences that actually answers the question. Only add detail the user asked for. Do NOT pad responses with section headers, boilerplate, or repeated recommendations unless the question is genuinely complex or multi-part. For a simple question, a tight 2-4 sentence answer is ideal; reserve headers (### Diagnostic Breakdown, ### How AITA Measures This) for when the user explicitly asks for a deep breakdown. Never invent numbers — cite only values present in ACTIVE ASSESSMENT CONTEXT; if a value is missing, say so briefly.
+6. **Grounding & Accuracy**: Base every claim on the ACTIVE ASSESSMENT CONTEXT and DATABASE RECORDS below. When explaining why an answer was wrong, quote the student's answer and the correct answer from the Itemized Question Diagnostic Log and explain the gap in one or two sentences. When explaining why a cognitive vector is low/high, cite its exact % and the one or two telemetry factors that drove it.${formattedActiveContext}${databaseContextStr}`;
 
     const apiMessages = [
       { role: 'system', content: systemPrompt },

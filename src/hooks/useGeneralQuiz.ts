@@ -62,6 +62,33 @@ export function useGeneralQuiz() {
                 const confidence = calculateDynamicConfidence(overallMetrics, accuracyScore, reflectionText);
                 const perfScore = calculatePerformanceScore(overallMetrics, confidence, accuracyScore, 5);
 
+                // Itemized per-question log so the AI tutor can explain, precisely,
+                // why any given answer was right/wrong and how it maps to the score.
+                const letterToOption = (q: any, letter?: string) => {
+                    if (!q.options || !letter) return letter || '';
+                    const idx = letter.toUpperCase().charCodeAt(0) - 65;
+                    return q.options[idx] ? `${letter}) ${q.options[idx]}` : letter;
+                };
+                const itemizedDetails = gQuestions.map((q) => {
+                    const raw = gAnswers[q.id];
+                    const rawStr = Array.isArray(raw) ? raw.filter(Boolean).join(' | ') : (raw ?? '');
+                    const isMcq = q.type === 'mcq';
+                    const ansDisplay = isMcq ? letterToOption(q, rawStr as string) : (rawStr || '[No Answer]');
+                    const correctDisplay = q.correctAnswer
+                        ? (isMcq ? letterToOption(q, q.correctAnswer) : q.correctAnswer)
+                        : (q.category === 'psych' ? 'Open-ended (no single correct answer)' : undefined);
+                    return {
+                        id: q.id,
+                        q: q.question,
+                        type: q.category ? `${q.type}/${q.category}` : q.type,
+                        marks: 1,
+                        ans: String(ansDisplay),
+                        correct: correctDisplay,
+                        isCorrect: grade.perQuestion[q.id],
+                        revisions: qMetrics?.[q.id]?.answerChanges,
+                    };
+                });
+
                 const result: ScenarioResult = {
                     scenarioNumber: 1,
                     scenarioTitle: gScenario?.title || 'General Aptitude Test',
@@ -85,6 +112,7 @@ export function useGeneralQuiz() {
                     marksObtained: grade.correct,
                     totalMarks: grade.graded,
                     perQuestionCorrect: grade.perQuestion,
+                    itemizedDetails,
                     answers: { ...gAnswers },
                     questions: [...gQuestions],
                     questionsMetrics: qMetrics ? { ...qMetrics } : undefined,
