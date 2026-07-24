@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
-import { register, login, forgotPassword, resetPassword, AuthUser } from '../../services/api';
+import { register, login, forgotPassword, resetPassword, verifyEmailToken, resendVerification, AuthUser } from '../../services/api';
 
 interface AuthScreenProps {
     onAuthSuccess: (user: AuthUser) => void;
     resetToken?: string | null;
+    verifyToken?: string | null;
     onResetComplete?: () => void;
+    onVerifyComplete?: () => void;
 }
 
 type AuthMode = 'login' | 'register' | 'forgot' | 'reset';
 
-export function AuthScreen({ onAuthSuccess, resetToken, onResetComplete }: AuthScreenProps) {
+export function AuthScreen({ onAuthSuccess, resetToken, verifyToken, onResetComplete, onVerifyComplete }: AuthScreenProps) {
     const [mode, setMode] = useState<AuthMode>('login');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -18,6 +20,7 @@ export function AuthScreen({ onAuthSuccess, resetToken, onResetComplete }: AuthS
     const [error, setError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
 
     // If reset token is supplied on mount, enter reset mode automatically
     useEffect(() => {
@@ -28,16 +31,74 @@ export function AuthScreen({ onAuthSuccess, resetToken, onResetComplete }: AuthS
         }
     }, [resetToken]);
 
+    // Handle verifyToken query param on mount
+    useEffect(() => {
+        if (verifyToken) {
+            setIsLoading(true);
+            setError('');
+            setSuccessMessage('Verifying your email address...');
+            
+            verifyEmailToken(verifyToken)
+                .then((res) => {
+                    setIsLoading(false);
+                    if (res.success && res.user) {
+                        setSuccessMessage('🎉 Your email has been verified successfully! Logging you in...');
+                        setTimeout(() => {
+                            onAuthSuccess(res.user!);
+                        }, 1500);
+                    } else if (res.success) {
+                        setSuccessMessage('🎉 Your email has been verified successfully! You can now log in.');
+                        setMode('login');
+                    } else {
+                        setError(res.error || 'Invalid or expired verification link.');
+                        setMode('login');
+                    }
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    if (onVerifyComplete) onVerifyComplete();
+                })
+                .catch(() => {
+                    setIsLoading(false);
+                    setError('Failed to verify email. Please try again.');
+                    setMode('login');
+                });
+        }
+    }, [verifyToken]);
+
+    const handleResend = async () => {
+        if (!unverifiedEmail) return;
+        setIsLoading(true);
+        setError('');
+        try {
+            const res = await resendVerification(unverifiedEmail);
+            if (res.success) {
+                setSuccessMessage('✉️ A new verification link has been sent to ' + unverifiedEmail);
+            } else {
+                setError(res.error || 'Failed to resend verification email.');
+            }
+        } catch {
+            setError('Failed to resend verification email.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
         setSuccessMessage('');
+        setUnverifiedEmail(null);
         setIsLoading(true);
 
         try {
             if (mode === 'register') {
                 const result = await register(email, password, name);
-                if (result.success && result.user) {
+                if (result.requiresVerification) {
+                    setSuccessMessage(result.message || '🎉 Registration successful! Please check your email inbox and click "Yes, it\'s me" to activate your account.');
+                    setUnverifiedEmail(email);
+                    setPassword('');
+                    setName('');
+                    setMode('login');
+                } else if (result.success && result.user) {
                     onAuthSuccess(result.user);
                 } else {
                     setError(result.error || 'Registration failed.');
@@ -46,13 +107,16 @@ export function AuthScreen({ onAuthSuccess, resetToken, onResetComplete }: AuthS
                 const result = await login(email, password);
                 if (result.success && result.user) {
                     onAuthSuccess(result.user);
+                } else if (result.requiresVerification) {
+                    setUnverifiedEmail(email);
+                    setError(result.error || 'Please verify your email before logging in.');
                 } else {
                     setError(result.error || 'Invalid email or password.');
                 }
             } else if (mode === 'forgot') {
                 const result = await forgotPassword(email);
                 if (result.success) {
-                    setSuccessMessage('Check your email/terminal for the password reset link.');
+                    setSuccessMessage('Check your email for the password reset link.');
                     setEmail('');
                 } else {
                     setError(result.error || 'Failed to send password reset request.');
@@ -256,16 +320,40 @@ export function AuthScreen({ onAuthSuccess, resetToken, onResetComplete }: AuthS
                         )}
 
                         {error && (
-                            <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-start gap-2">
-                                <span>⚠️</span>
-                                <span>{error}</span>
+                            <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex flex-col gap-2">
+                                <div className="flex items-start gap-2">
+                                    <span>⚠️</span>
+                                    <span>{error}</span>
+                                </div>
+                                {unverifiedEmail && (
+                                    <button
+                                        type="button"
+                                        onClick={handleResend}
+                                        disabled={isLoading}
+                                        className="text-xs text-primary-300 hover:text-primary-200 underline text-left mt-1"
+                                    >
+                                        Resend "Yes, it's me" verification link to {unverifiedEmail}
+                                    </button>
+                                )}
                             </div>
                         )}
 
                         {successMessage && (
-                            <div className="text-green-400 text-sm bg-green-500/10 border border-green-500/20 rounded-lg p-3 flex items-start gap-2">
-                                <span>✅</span>
-                                <span>{successMessage}</span>
+                            <div className="text-green-400 text-sm bg-green-500/10 border border-green-500/20 rounded-lg p-3 flex flex-col gap-2">
+                                <div className="flex items-start gap-2">
+                                    <span>✅</span>
+                                    <span>{successMessage}</span>
+                                </div>
+                                {unverifiedEmail && (
+                                    <button
+                                        type="button"
+                                        onClick={handleResend}
+                                        disabled={isLoading}
+                                        className="text-xs text-primary-300 hover:text-primary-200 underline text-left mt-1"
+                                    >
+                                        Didn't receive it? Click to resend email
+                                    </button>
+                                )}
                             </div>
                         )}
 

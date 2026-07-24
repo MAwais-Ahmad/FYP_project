@@ -47,9 +47,14 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
     const [isGrading, setIsGrading] = useState(false);
     const [gradeError, setGradeError] = useState('');
 
-    // Snapshot of the last committed written answer per question, used to count
-    // genuine revisions on blur (not every keystroke).
-    const writtenSnapshots = useRef<Record<number, string>>({});
+    // Revision tracking for written answers. A "revision" is a contiguous editing
+    // burst where the student REMOVES text (backspaces / deletes), no matter how
+    // many characters — the whole run counts as ONE revision. Typing new text ends
+    // the current run, so the next deletion burst counts as a fresh revision.
+    // writtenPrevLen holds the last seen length per question; inDeleteRun marks
+    // whether we're mid-deletion so we don't count every removed character.
+    const writtenPrevLen = useRef<Record<number, number>>({});
+    const inDeleteRun = useRef<Record<number, boolean>>({});
     // Guards against the overall timer and the button both submitting.
     const submittedRef = useRef(false);
 
@@ -106,19 +111,24 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
 
     const handleWrittenAnswer = (text: string) => {
         recordFirstInteraction();
-        setSelectedAnswers(prev => ({ ...prev, [currentQuestion.id]: text }));
-    };
-
-    // Count a written revision on blur when the answer meaningfully changed after
-    // having had content — mirrors MCQ answer-change tracking for text questions.
-    const handleWrittenBlur = () => {
         const id = currentQuestion.id;
-        const current = (selectedAnswers[id] || '').trim();
-        const snapshot = writtenSnapshots.current[id];
-        if (snapshot !== undefined && snapshot.length > 0 && current.length > 0 && current !== snapshot) {
-            setRevisionCounts(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
+        const prevLen = writtenPrevLen.current[id] ?? (selectedAnswers[id]?.length ?? 0);
+        const newLen = text.length;
+
+        if (newLen < prevLen) {
+            // Backspacing / deleting. Count the entire contiguous deletion burst as
+            // a single revision instead of one per removed character.
+            if (!inDeleteRun.current[id]) {
+                inDeleteRun.current[id] = true;
+                setRevisionCounts(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
+            }
+        } else if (newLen > prevLen) {
+            // Adding text again closes the current deletion burst.
+            inDeleteRun.current[id] = false;
         }
-        writtenSnapshots.current[id] = current;
+
+        writtenPrevLen.current[id] = newLen;
+        setSelectedAnswers(prev => ({ ...prev, [id]: text }));
     };
 
     // Navigate, counting backward moves as backtracks (reviewing/editing).
@@ -330,7 +340,6 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
                                     className="text-input min-h-[160px] text-sm resize-y"
                                     value={currentAnswer}
                                     onChange={(e) => handleWrittenAnswer(e.target.value)}
-                                    onBlur={handleWrittenBlur}
                                     placeholder="Type your answer here..."
                                     rows={7}
                                 />

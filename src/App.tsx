@@ -17,7 +17,7 @@ import {
 import { AIChatDrawer } from './components/ui/AIChatDrawer';
 import { CustomExamResults } from './components/screens/CustomQuizScreen';
 import { useQuizState, useGeneralQuiz, useMetrics } from './hooks';
-import { AuthUser, getMe, logout as apiLogout, setSessionAssessment, getSessionAssessment, generateScenario } from './services/api';
+import { AuthUser, getMe, logout as apiLogout, setSessionAssessment, getSessionAssessment } from './services/api';
 import { StudentRecord } from './utils/storage';
 import { GeneratedExam } from './types/quiz.types';
 
@@ -96,6 +96,7 @@ function App() {
     // Connection state
     const [isOffline, setIsOffline] = useState(!navigator.onLine);
     const [resetToken, setResetToken] = useState<string | null>(null);
+    const [verifyToken, setVerifyToken] = useState<string | null>(null);
 
     // Track online/offline status
     useEffect(() => {
@@ -111,27 +112,30 @@ function App() {
         };
     }, []);
 
-    // Check for existing auth & parse resetToken on mount
+    // Check for existing auth & parse resetToken/verifyToken on mount
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
-        const token = params.get('resetToken');
-        if (token) {
-            setResetToken(token);
+        const rToken = params.get('resetToken');
+        const vToken = params.get('verifyToken');
+        if (rToken) {
+            setResetToken(rToken);
             setScreen('auth');
-            // Clean up the URL search params for security
             window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (vToken) {
+            setVerifyToken(vToken);
+            setScreen('auth');
         }
 
         getMe().then((result) => {
             if (result.success && result.user) {
                 setCurrentUser(result.user);
-                // If there's no resetToken in the URL, proceed to user dashboard
-                if (!token) {
+                // If there's no resetToken/verifyToken in the URL, proceed to user dashboard
+                if (!rToken && !vToken) {
                     setScreen('user-dashboard');
                 }
             } else {
-                // If not logged in and no resetToken is present, force redirect to auth screen
-                if (!token) {
+                // If not logged in and no token is present, force redirect to auth screen
+                if (!rToken && !vToken) {
                     setScreen('auth');
                 }
             }
@@ -184,7 +188,13 @@ function App() {
     const handleGeneralRestart = () => {
         resetMetrics();
         resetGeneral();
-        setScreen(currentUser ? 'user-dashboard' : 'welcome');
+        // A session participant lands back on the session dashboard; solo takers go
+        // to their own dashboard (or the welcome screen as a guest).
+        if (activeSessionId) {
+            setScreen('session-dashboard');
+        } else {
+            setScreen(currentUser ? 'user-dashboard' : 'welcome');
+        }
     };
 
 
@@ -225,27 +235,20 @@ function App() {
         }
     };
 
-    // Host chose AI Scenario → generate one shared scenario, save it to the session.
-    const handleAuthorScenario = async (difficultyLevel: number) => {
+    // Host chose the General Aptitude Test → save it as the session's assessment.
+    // There's no paper to build: each participant's client generates and grades its
+    // own randomized attempt, so we only record the kind.
+    const handleAuthorGeneralQuiz = async () => {
         if (!activeSessionId) return;
         setSessionBusy(true);
         setSessionError('');
-        try {
-            const gen = await generateScenario(undefined, 1, difficultyLevel, []);
-            if (!gen.success) throw new Error(gen.message || 'Scenario generation failed');
-            const res = await setSessionAssessment(activeSessionId, {
-                kind: 'ai-scenario',
-                scenario: gen.scenario,
-                questions: gen.questions,
-                difficultyLevel,
-            });
-            if (!res.success) throw new Error(res.error || 'Failed to save the scenario');
+        const res = await setSessionAssessment(activeSessionId, { kind: 'general-aptitude' });
+        setSessionBusy(false);
+        if (res.success) {
             setAuthoringSession(false);
             setScreen('session-dashboard');
-        } catch (err: any) {
-            setSessionError(err?.message || 'Failed to create the scenario assessment');
-        } finally {
-            setSessionBusy(false);
+        } else {
+            setSessionError(res.error || 'Failed to save the session assessment');
         }
     };
 
@@ -267,6 +270,13 @@ function App() {
         } else if (a.kind === 'ai-scenario') {
             startMetrics();
             startPresetScenario(a.scenario, a.questions, a.difficultyLevel || 5, currentUser?.name);
+        } else if (a.kind === 'general-aptitude') {
+            // Same self-contained General Aptitude flow as solo, but activeSessionId
+            // stays set so the resulting record links back to this session.
+            resetMetrics();
+            startMetrics();
+            startGeneralQuiz(currentUser?.name || 'Anonymous');
+            setScreen('general-quiz');
         } else {
             setSessionError('This assessment type is not supported.');
         }
@@ -418,7 +428,9 @@ function App() {
                 <AuthScreen
                     onAuthSuccess={handleAuthSuccess}
                     resetToken={resetToken}
+                    verifyToken={verifyToken}
                     onResetComplete={() => setResetToken(null)}
+                    onVerifyComplete={() => setVerifyToken(null)}
                 />
             )}
 
@@ -440,7 +452,7 @@ function App() {
                     onStartGeneralQuiz={handleStartGeneralQuiz}
                     sessionAuthor={authoringSession}
                     onAuthorCustomExam={handleAuthorCustomExam}
-                    onAuthorScenario={handleAuthorScenario}
+                    onAuthorGeneralQuiz={handleAuthorGeneralQuiz}
                     onBack={() => {
                         setAuthoringSession(false);
                         if (activeSessionId) {
@@ -594,6 +606,7 @@ function App() {
                     onViewDashboard={
                         currentUser ? () => setScreen('user-dashboard') : undefined
                     }
+                    sessionId={activeSessionId}
                 />
             )}
 

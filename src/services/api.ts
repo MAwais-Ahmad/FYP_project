@@ -66,6 +66,8 @@ interface AuthResponse {
     token?: string;
     user?: AuthUser;
     error?: string;
+    requiresVerification?: boolean;
+    message?: string;
 }
 
 export async function register(email: string, password: string, name: string): Promise<AuthResponse> {
@@ -88,6 +90,22 @@ export async function register(email: string, password: string, name: string): P
         return { success: true, token, user: fallbackUser };
     }
     return data;
+}
+
+export async function verifyEmailToken(token: string): Promise<AuthResponse> {
+    const data = await safeApiJson(`${API_BASE}/auth/verify-email?token=${encodeURIComponent(token)}`, {
+        method: 'GET',
+    });
+    if (data.token) setToken(data.token);
+    return data;
+}
+
+export async function resendVerification(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    return safeApiJson(`${API_BASE}/auth/resend-verification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+    });
 }
 
 export async function login(email: string, password: string): Promise<AuthResponse> {

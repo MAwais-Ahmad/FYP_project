@@ -29,6 +29,10 @@ model User {
   resetToken         String?         @unique
   resetTokenExpires  DateTime?
 
+  isVerified                 Boolean         @default(false)
+  verificationToken          String?         @unique
+  verificationTokenExpires   DateTime?
+
   records      Record[]        // Solo test results
   sessions     Session[]       // Sessions this user hosts
   memberships  SessionMember[] // Sessions this user joined

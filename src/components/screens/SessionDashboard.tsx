@@ -34,6 +34,7 @@ interface SessionInfo {
 const KIND_LABEL: Record<string, string> = {
     'custom-exam': '📝 Custom Exam (MCQ / Short / Long)',
     'ai-scenario': '🧠 AI Decision Scenario',
+    'general-aptitude': '🧩 General Aptitude Test',
 };
 
 // Map a raw DB record (+ owner name) into the StudentRecord shape RecordDetail uses.
@@ -417,6 +418,17 @@ export function SessionDashboard({
                                         )}
                                     </div>
                                 ))}
+                            </div>
+                        )}
+                        {previewData?.kind === 'general-aptitude' && (
+                            <div className="p-4 rounded-xl bg-white/5 border border-white/5 space-y-2">
+                                <p className="font-semibold">🧩 General Aptitude Test</p>
+                                <p className="text-sm text-white/60">
+                                    A 12-question mix of problem-solving &amp; reflection, general knowledge, logical,
+                                    verbal and visual diagram puzzles. It is randomly generated for each participant,
+                                    so there is no fixed paper to preview — every attempt differs and is auto-graded
+                                    with an instant cognitive profile.
+                                </p>
                             </div>
                         )}
                         {previewData?.kind === 'ai-scenario' && (

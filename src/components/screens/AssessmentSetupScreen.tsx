@@ -10,11 +10,11 @@ interface AssessmentSetupScreenProps {
     userName?: string;
     // Session-authoring mode: the host is creating the paper for a session rather
     // than taking it. Custom exams are handed to onAuthorCustomExam (saved to the
-    // session) and the AI Scenario card asks for a difficulty then calls
-    // onAuthorScenario, instead of starting the assessment.
+    // session) and the General Aptitude Test card calls onAuthorGeneralQuiz (saved
+    // to the session), instead of starting the assessment.
     sessionAuthor?: boolean;
     onAuthorCustomExam?: (exam: GeneratedExam) => void;
-    onAuthorScenario?: (difficultyLevel: number) => void;
+    onAuthorGeneralQuiz?: () => void;
 }
 
 type SetupTab = 'select-mode' | 'custom-paper' | 'ai-material';
@@ -193,13 +193,9 @@ export function AssessmentSetupScreen({
     userName,
     sessionAuthor = false,
     onAuthorCustomExam,
-    onAuthorScenario,
+    onAuthorGeneralQuiz,
 }: AssessmentSetupScreenProps) {
     const [tab, setTab] = useState<SetupTab>('select-mode');
-
-    // AI-scenario difficulty picker (session authoring only)
-    const [scenarioDifficulty, setScenarioDifficulty] = useState(5);
-    const [showScenarioDifficulty, setShowScenarioDifficulty] = useState(false);
 
     // Route a finished custom exam either to the session (author) or the taker.
     // Attaches the creator's timer settings and, for manual (client-owned) exams,
@@ -600,10 +596,13 @@ export function AssessmentSetupScreen({
                     </div>
 
                     <div className="grid gap-4">
-                        {/* General Aptitude Test (solo only) */}
-                        {!sessionAuthor && onStartGeneralQuiz && (
+                        {/* General Aptitude Test — available for BOTH solo and session.
+                            Solo starts it immediately; a session host authors it as the
+                            shared assessment (each participant gets their own randomized
+                            attempt). */}
+                        {(sessionAuthor ? onAuthorGeneralQuiz : onStartGeneralQuiz) && (
                             <button
-                                onClick={onStartGeneralQuiz}
+                                onClick={() => (sessionAuthor ? onAuthorGeneralQuiz?.() : onStartGeneralQuiz?.())}
                                 className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-emerald-500/30"
                             >
                                 <div className="flex items-start gap-4">
@@ -614,29 +613,7 @@ export function AssessmentSetupScreen({
                                             A quick 12-question mix of problem-solving &amp; reflection, general knowledge, logical, verbal and visual diagram puzzles. Randomly generated so every attempt differs — instant marks + cognitive profile.
                                         </p>
                                         <span className="inline-block text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full mt-1">
-                                            12 Questions · Auto-Graded
-                                        </span>
-                                    </div>
-                                </div>
-                            </button>
-                        )}
-
-                        {/* General AI Scenario — session authoring only; the solo
-                            "general quiz" is the General Aptitude Test above. */}
-                        {sessionAuthor && (
-                            <button
-                                onClick={() => setShowScenarioDifficulty(true)}
-                                className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-primary-500/30"
-                            >
-                                <div className="flex items-start gap-4">
-                                    <div className="text-4xl group-hover:scale-110 transition-transform">🧠</div>
-                                    <div className="space-y-1">
-                                        <h3 className="font-bold text-xl">General AI Scenario</h3>
-                                        <p className="text-white/50 text-sm leading-relaxed">
-                                            AI generates interactive dilemmas with sliders, rankings, and MCQs. Measures cognitive profile through behavioral telemetry.
-                                        </p>
-                                        <span className="inline-block text-xs bg-primary-500/20 text-primary-300 px-2 py-0.5 rounded-full mt-1">
-                                            One shared scenario for all
+                                            {sessionAuthor ? 'One aptitude test for all participants' : '12 Questions · Auto-Graded'}
                                         </span>
                                     </div>
                                 </div>
@@ -682,43 +659,6 @@ export function AssessmentSetupScreen({
                         </button>
                     </div>
                 </div>
-
-                {/* AI Scenario difficulty picker (session authoring) */}
-                {showScenarioDifficulty && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
-                        <div className="glass-card max-w-md w-full p-8 space-y-5 border border-white/10 shadow-2xl">
-                            <div className="text-center space-y-1">
-                                <div className="text-4xl">🧠</div>
-                                <h2 className="text-xl font-bold">Scenario Difficulty</h2>
-                                <p className="text-white/50 text-sm">Pick the challenge level for the shared scenario.</p>
-                            </div>
-                            <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <label className="text-sm text-white/70">Difficulty</label>
-                                    <span className="text-lg font-bold text-primary-300">{scenarioDifficulty}/10</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min={1}
-                                    max={10}
-                                    value={scenarioDifficulty}
-                                    onChange={(e) => setScenarioDifficulty(parseInt(e.target.value))}
-                                    className="w-full accent-primary-500"
-                                />
-                                <div className="flex justify-between text-xs text-white/30"><span>Easy</span><span>Expert</span></div>
-                            </div>
-                            <div className="flex gap-3 justify-end">
-                                <button onClick={() => setShowScenarioDifficulty(false)} className="btn-secondary !py-2.5 !px-5">Cancel</button>
-                                <button
-                                    onClick={() => { setShowScenarioDifficulty(false); onAuthorScenario?.(scenarioDifficulty); }}
-                                    className="btn-primary !py-2.5 !px-6"
-                                >
-                                    ✅ Create for Session
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </section>
         );
     }

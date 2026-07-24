@@ -157,6 +157,101 @@ function requireAuth(req, res, next) {
 
 app.use(authMiddleware);
 
+// ─── EMAIL TRANSPORTER SETUP ────────────────────────────────────────────────
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER || 'awais.ahmad.de@gmail.com',
+    pass: process.env.SMTP_PASS || 'issqqdqjgnggohbq',
+  },
+});
+
+function getAppUrl(req) {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, '');
+  if (req && req.headers && req.headers.origin) return req.headers.origin.replace(/\/$/, '');
+  if (req && req.headers && req.headers.host) {
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    return `${protocol}://${req.headers.host}`;
+  }
+  return 'http://localhost:5173';
+}
+
+async function sendVerificationEmail(email, token, req) {
+  const baseUrl = getAppUrl(req);
+  const verifyLink = `${baseUrl}/?verifyToken=${token}`;
+  console.log(`\n✉️ [VERIFICATION LINK GENERATED FOR ${email}]:\n👉 ${verifyLink}\n`);
+
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || `"AITA Support" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: 'Verify Your AITA Account — Yes, it\'s me!',
+      text: `Welcome to AITA! Please click the link below to verify your account:\n\n${verifyLink}\n\nThis link is valid for 24 hours.`,
+      html: `<div style="font-family: Arial, sans-serif; padding: 25px; max-width: 520px; margin: 0 auto; border: 1px solid #1e293b; border-radius: 16px; background-color: #0b0f19; color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h1 style="color: #6366f1; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">AITA</h1>
+          <p style="color: #94a3b8; font-size: 14px; margin-top: 4px;">AI Assessment & Profiling Platform</p>
+        </div>
+        <h2 style="color: #f8fafc; font-size: 20px; text-align: center; margin-bottom: 12px;">Confirm Your Email Address</h2>
+        <p style="color: #cbd5e1; font-size: 15px; line-height: 1.6; text-align: center;">
+          Thanks for signing up for AITA! Please click the button below to verify your email address and activate your account.
+        </p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${verifyLink}" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);">
+            Yes, it's me
+          </a>
+        </div>
+        <p style="color: #64748b; font-size: 13px; text-align: center;">Or copy and paste this verification link into your browser:</p>
+        <p style="word-break: break-all; text-align: center; font-size: 13px; margin-bottom: 25px;"><a href="${verifyLink}" style="color: #818cf8;">${verifyLink}</a></p>
+        <hr style="border: 0; border-top: 1px solid #1e293b; margin: 20px 0;" />
+        <p style="font-size: 12px; color: #64748b; text-align: center; margin: 0;">This link is valid for 24 hours. If you didn't create an account, you can safely ignore this email.</p>
+      </div>`,
+    });
+    console.log(`🟢 Verification email sent successfully to ${email}`);
+  } catch (err) {
+    console.error(`🔴 Failed to send verification email to ${email}:`, err.message);
+  }
+}
+
+async function sendResetPasswordEmail(email, token, req) {
+  const baseUrl = getAppUrl(req);
+  const resetLink = `${baseUrl}/?resetToken=${token}`;
+  console.log(`\n🔑 [PASSWORD RESET LINK GENERATED FOR ${email}]:\n👉 ${resetLink}\n`);
+
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || `"AITA Support" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: 'Reset Your AITA Password',
+      text: `You requested to reset your password. Click the link below to set a new password:\n\n${resetLink}\n\nThis link is valid for 1 hour.`,
+      html: `<div style="font-family: Arial, sans-serif; padding: 25px; max-width: 520px; margin: 0 auto; border: 1px solid #1e293b; border-radius: 16px; background-color: #0b0f19; color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h1 style="color: #6366f1; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">AITA</h1>
+          <p style="color: #94a3b8; font-size: 14px; margin-top: 4px;">AI Assessment & Profiling Platform</p>
+        </div>
+        <h2 style="color: #f8fafc; font-size: 20px; text-align: center; margin-bottom: 12px;">Password Reset Request</h2>
+        <p style="color: #cbd5e1; font-size: 15px; line-height: 1.6; text-align: center;">
+          We received a request to reset the password for your account. Click the button below to choose a new password:
+        </p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetLink}" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);">
+            Reset Password
+          </a>
+        </div>
+        <p style="color: #64748b; font-size: 13px; text-align: center;">Or copy and paste this link into your browser:</p>
+        <p style="word-break: break-all; text-align: center; font-size: 13px; margin-bottom: 25px;"><a href="${resetLink}" style="color: #818cf8;">${resetLink}</a></p>
+        <hr style="border: 0; border-top: 1px solid #1e293b; margin: 20px 0;" />
+        <p style="font-size: 12px; color: #64748b; text-align: center; margin: 0;">This link will expire in 1 hour. If you didn't request a password reset, you can safely ignore this message.</p>
+      </div>`,
+    });
+    console.log(`🟢 Reset email sent successfully to ${email}`);
+  } catch (err) {
+    console.error(`🔴 Failed to send reset email to ${email}:`, err.message);
+  }
+}
+
 // ─── AUTH ENDPOINTS ──────────────────────────────────────────────────────────
 app.post('/api/auth/register', async (req, res) => {
   if (!isDbConnected) {
@@ -170,29 +265,141 @@ app.post('/api/auth/register', async (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
     }
-    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-    if (existing) {
+    const cleanEmail = email.toLowerCase().trim();
+    const existing = await prisma.user.findUnique({ where: { email: cleanEmail } });
+    
+    // If existing and already verified, reject duplicate registration
+    if (existing && existing.isVerified) {
       return res.status(409).json({ success: false, error: 'An account with this email already exists' });
     }
-    const user = await prisma.user.create({
-      data: {
-        email: email.toLowerCase(),
-        passwordHash: hashPassword(password),
-        name: name.trim(),
-        role: 'USER'
-      }
-    });
-    const token = generateToken();
-    tokenStore.set(token, user.id);
-    console.log(`✅ User registered: ${user.email}`);
+
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenExpires = new Date(Date.now() + 24 * 3600000); // 24 hours
+
+    let user;
+    if (existing && !existing.isVerified) {
+      // Re-send verification link to existing unverified registration
+      user = await prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          name: name.trim(),
+          passwordHash: hashPassword(password),
+          verificationToken,
+          verificationTokenExpires
+        }
+      });
+    } else {
+      user = await prisma.user.create({
+        data: {
+          email: cleanEmail,
+          passwordHash: hashPassword(password),
+          name: name.trim(),
+          role: 'USER',
+          isVerified: false,
+          verificationToken,
+          verificationTokenExpires
+        }
+      });
+    }
+
+    // Send verification email
+    await sendVerificationEmail(user.email, verificationToken, req);
+    console.log(`✉️ Verification email sent for registration: ${user.email}`);
+
     res.json({
       success: true,
-      token,
-      user: { id: user.id, email: user.email, name: user.name, role: user.role }
+      requiresVerification: true,
+      message: 'Registration successful! We have sent a verification email to your inbox. Please click "Yes, it\'s me" in the email to activate your account.'
     });
   } catch (error) {
     console.error('❌ Registration error:', error.message);
     res.status(500).json({ success: false, error: 'Registration failed', message: error.message });
+  }
+});
+
+app.all('/api/auth/verify-email', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, error: 'Database is currently offline' });
+  }
+  try {
+    const token = req.query.token || req.body.token;
+    if (!token) {
+      return res.status(400).json({ success: false, error: 'Verification token is required' });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: {
+        verificationToken: token,
+        verificationTokenExpires: {
+          gt: new Date()
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(400).json({ success: false, error: 'Invalid or expired verification link' });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isVerified: true,
+        verificationToken: null,
+        verificationTokenExpires: null
+      }
+    });
+
+    const authToken = generateToken();
+    tokenStore.set(authToken, updatedUser.id);
+
+    console.log(`✅ Email verified successfully: ${updatedUser.email}`);
+    res.json({
+      success: true,
+      token: authToken,
+      user: { id: updatedUser.id, email: updatedUser.email, name: updatedUser.name, role: updatedUser.role },
+      message: 'Your account has been verified successfully! Welcome to AITA.'
+    });
+  } catch (error) {
+    console.error('❌ Email verification error:', error.message);
+    res.status(500).json({ success: false, error: 'Email verification failed', message: error.message });
+  }
+});
+
+app.post('/api/auth/resend-verification', async (req, res) => {
+  if (!isDbConnected) {
+    return res.status(503).json({ success: false, error: 'Database is currently offline' });
+  }
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email is required' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+    if (!user) {
+      return res.json({ success: true, message: 'If an unverified account exists, a verification link has been sent.' });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({ success: false, error: 'This account is already verified. You can log in.' });
+    }
+
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenExpires = new Date(Date.now() + 24 * 3600000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        verificationToken,
+        verificationTokenExpires
+      }
+    });
+
+    await sendVerificationEmail(user.email, verificationToken, req);
+    res.json({ success: true, message: 'A new verification email has been sent.' });
+  } catch (error) {
+    console.error('❌ Resend verification error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to resend verification email' });
   }
 });
 
@@ -205,10 +412,20 @@ app.post('/api/auth/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ success: false, error: 'Email and password are required' });
     }
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
     if (!user || !verifyPassword(password, user.passwordHash)) {
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
     }
+
+    if (!user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        requiresVerification: true,
+        email: user.email,
+        error: 'Please verify your email before logging in. Check your inbox for the "Yes, it\'s me" link.'
+      });
+    }
+
     const token = generateToken();
     tokenStore.set(token, user.id);
     console.log(`✅ User logged in: ${user.email}`);
@@ -222,64 +439,6 @@ app.post('/api/auth/login', async (req, res) => {
     res.status(500).json({ success: false, error: 'Login failed', message: error.message });
   }
 });
-
-app.post('/api/auth/logout', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    tokenStore.delete(authHeader.slice(7));
-  }
-  res.json({ success: true });
-});
-
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({
-    success: true,
-    user: { id: req.user.id, email: req.user.email, name: req.user.name, role: req.user.role }
-  });
-});
-
-// ─── EMAIL TRANSPORTER SETUP ────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.ethereal.email',
-  port: parseInt(process.env.SMTP_PORT) || 587,
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER || 'mock_user',
-    pass: process.env.SMTP_PASS || 'mock_pass',
-  },
-});
-
-async function sendResetPasswordEmail(email, token) {
-  const resetLink = `http://localhost:5173/?resetToken=${token}`;
-  console.log(`\n🔑 [PASSWORD RESET LINK GENERATED FOR ${email}]:\n👉 ${resetLink}\n`);
-
-  if (process.env.SMTP_USER && process.env.SMTP_HOST && process.env.SMTP_USER !== 'mock_user') {
-    try {
-      await transporter.sendMail({
-        from: `"AITA Support" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
-        to: email,
-        subject: 'Reset Your AITA Password',
-        text: `You requested to reset your password. Click the link below to set a new password:\n\n${resetLink}\n\nThis link is valid for 1 hour.`,
-        html: `<div style="font-family: sans-serif; padding: 20px; color: #333; max-width: 500px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #0b0f19; color: #ffffff;">
-          <h2 style="color: #6366f1; text-align: center;">AITA Password Reset</h2>
-          <p>You requested to reset your password. Click the button below to set a new password:</p>
-          <div style="text-align: center; margin: 25px 0;">
-            <a href="${resetLink}" style="background-color: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Reset Password</a>
-          </div>
-          <p style="color: #9ca3af; font-size: 14px;">Or copy and paste this link into your browser:</p>
-          <p style="word-break: break-all; color: #818cf8;"><a href="${resetLink}" style="color: #818cf8;">${resetLink}</a></p>
-          <hr style="border: 0; border-top: 1px solid #1f2937; margin: 20px 0;" />
-          <p style="font-size: 12px; color: #9ca3af; text-align: center;">This link will expire in 1 hour. If you didn't request a password reset, you can safely ignore this email.</p>
-        </div>`,
-      });
-      console.log(`🟢 Reset email sent successfully to ${email}`);
-    } catch (err) {
-      console.error(`🔴 Failed to send reset email to ${email}:`, err.message);
-    }
-  } else {
-    console.log(`ℹ️ SMTP not configured. Reset link printed to console above.`);
-  }
-}
 
 app.post('/api/auth/forgot-password', async (req, res) => {
   if (!isDbConnected) {
@@ -307,7 +466,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       }
     });
 
-    await sendResetPasswordEmail(user.email, token);
+    await sendResetPasswordEmail(user.email, token, req);
 
     res.json({ success: true, message: 'If the email exists, a reset link has been sent' });
   } catch (error) {
@@ -594,6 +753,11 @@ function stripSessionAssessment(assessment) {
   if (assessment.kind === 'ai-scenario') {
     return { kind: 'ai-scenario', scenario: assessment.scenario, questions: assessment.questions };
   }
+  // The General Aptitude Test is generated fresh (and randomly) on the client for
+  // each participant, so there is nothing to strip — the kind alone is enough.
+  if (assessment.kind === 'general-aptitude') {
+    return { kind: 'general-aptitude' };
+  }
   return null;
 }
 
@@ -636,6 +800,10 @@ app.post('/api/sessions/:id/assessment', requireAuth, async (req, res) => {
         return res.status(400).json({ success: false, error: 'A generated scenario with questions is required.' });
       }
       assessment = { kind: 'ai-scenario', scenario, questions, difficultyLevel: difficultyLevel || 5, createdAt: new Date().toISOString() };
+    } else if (kind === 'general-aptitude') {
+      // Self-contained randomized aptitude test — no server-side paper to build or
+      // store; every participant's client generates and grades its own attempt.
+      assessment = { kind: 'general-aptitude', createdAt: new Date().toISOString() };
     } else {
       return res.status(400).json({ success: false, error: 'Unknown assessment kind.' });
     }
@@ -1017,29 +1185,78 @@ async function extractWithOfficeParser(buffer, { ocr, fileType } = {}) {
   }
 }
 
-// OCR text extractor using OpenAI Vision for raw images (PNG, JPG, WEBP)
+// OCR text extractor using OpenAI Vision for raw images (PNG, JPG, WEBP).
+//
+// Two things make real-world exam-paper photos reliable here:
+//   1. detail:'high' — WITHOUT this OpenAI downscales the image to a low-res
+//      thumbnail, which shreds small/dense printed text on phone photos. This is
+//      the single biggest driver of "the clearest image still won't extract".
+//   2. gpt-4o (not gpt-4o-mini) for the OCR pass — it reads cramped, skewed, or
+//      handwritten papers far more accurately. We bypass callHighPrecisionAI on
+//      purpose: its OpenRouter fallback ('openrouter/auto') routes to whatever
+//      model it likes, which is frequently text-only and silently drops the
+//      image, returning an empty/garbage transcription.
+const OCR_VISION_MODEL = 'gpt-4o';
+const OCR_PROMPT =
+  'You are an OCR engine. Transcribe EVERY piece of text visible in this exam ' +
+  'paper / study document image, exactly as written, top to bottom, left to ' +
+  'right. Preserve question numbers, all MCQ options (A, B, C, D), marks, time ' +
+  'limits, headings, and any answer key. Output ONLY the raw transcribed text — ' +
+  'no commentary, no markdown fences, no explanation. If a region is unreadable, ' +
+  'write [unreadable] in its place rather than guessing.';
+
+// Strip a leading/trailing ``` fence the model sometimes wraps OCR output in.
+function stripCodeFences(text) {
+  return (text || '')
+    .replace(/^\s*```[a-zA-Z]*\s*\n?/, '')
+    .replace(/\n?\s*```\s*$/, '')
+    .trim();
+}
+
+async function visionTranscribe(client, model, dataUrl) {
+  const response = await client.chat.completions.create({
+    model,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: OCR_PROMPT },
+          { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
+        ],
+      },
+    ],
+    max_tokens: 8000,
+    temperature: 0,
+  });
+  return stripCodeFences(response.choices[0]?.message?.content || '');
+}
+
 async function extractImageTextWithVision(buffer, mimeType = 'image/png') {
-  try {
-    const base64 = buffer.toString('base64');
-    const dataUrl = `data:${mimeType};base64,${base64}`;
-    const response = await openai.chat.completions.create({
-      model: MODEL,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Transcribe all text from this exam paper or study document accurately. Retain all question headers, numbers, options, marks, time limits, and answer keys.' },
-            { type: 'image_url', image_url: { url: dataUrl } }
-          ]
-        }
-      ],
-      max_tokens: 4000,
-    });
-    return response.choices[0]?.message?.content || '';
-  } catch (err) {
-    console.warn('⚠️ Vision OCR failed:', err.message);
-    return '';
+  const base64 = buffer.toString('base64');
+  const dataUrl = `data:${mimeType};base64,${base64}`;
+
+  // Primary: OpenAI gpt-4o vision with high detail.
+  if (openaiClient) {
+    try {
+      const text = await visionTranscribe(openaiClient, OCR_VISION_MODEL, dataUrl);
+      if (text.trim().length >= MIN_USABLE_TEXT_LENGTH) return text;
+      console.warn('⚠️ OpenAI vision returned too little text, trying fallback…');
+    } catch (err) {
+      console.warn(`⚠️ OpenAI vision OCR (${OCR_VISION_MODEL}) failed: ${err.message}. Trying fallback…`);
+    }
   }
+
+  // Fallback: an explicit vision-capable model on OpenRouter (NOT 'openrouter/auto',
+  // which may pick a text-only model that drops the image entirely).
+  if (openrouterClient) {
+    try {
+      return await visionTranscribe(openrouterClient, 'openai/gpt-4o', dataUrl);
+    } catch (err) {
+      console.warn('⚠️ OpenRouter vision OCR fallback failed:', err.message);
+    }
+  }
+
+  return '';
 }
 
 // Extract text from a single uploaded file buffer (PDF/PPTX/DOCX/TXT/PNG/JPG/WEBP), with
