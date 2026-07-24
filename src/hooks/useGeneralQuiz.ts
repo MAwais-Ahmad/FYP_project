@@ -48,7 +48,10 @@ export function useGeneralQuiz() {
             setGLoading(true);
             try {
                 const grade = gradeTest(gQuestions, gAnswers);
-                const accuracyScore = grade.accuracy;
+                // Profiling (classification, confidence, performance, the Accuracy
+                // radar) uses OBJECTIVE correctness so attempt-based open-ended marks
+                // don't inflate it. The X/N marks card still uses grade.correct.
+                const accuracyScore = grade.objectiveAccuracy;
                 const cognitiveFeatures = heuristicCognitiveFeatures(gAnswers, gQuestions, overallMetrics);
 
                 // Open-ended written answers feed the implicit confidence analysis

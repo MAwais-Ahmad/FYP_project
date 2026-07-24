@@ -505,9 +505,11 @@ export function isCorrect(q: Question, answer: string | string[] | undefined): b
 }
 
 export interface GradeSummary {
-    correct: number;
-    graded: number;
-    accuracy: number; // 0..1
+    correct: number;         // total marks earned (1/question, incl. attempt-based open-ended)
+    graded: number;          // total questions (= total marks)
+    accuracy: number;        // marks ratio (correct/graded) — matches the displayed X/N score
+    objectiveAccuracy: number; // correctness over ONLY objectively-gradable questions
+    objectiveCount: number;  // how many questions had a definite right answer
     perQuestion: Record<number, boolean>;
 }
 
@@ -559,17 +561,29 @@ export function computeVark(
 /** Grades the whole test locally (no AI call needed). */
 export function gradeTest(questions: Question[], answers: Record<number, string | string[]>): GradeSummary {
     let correct = 0;
+    let objectiveCorrect = 0;
+    let objectiveCount = 0;
     const perQuestion: Record<number, boolean> = {};
     questions.forEach(q => {
         const ok = isCorrect(q, answers[q.id]);
         perQuestion[q.id] = ok;
         if (ok) correct++;
+        // Objectively-gradable = has a definite right answer (MCQ / factual text).
+        // Open-ended reflection questions have no correctAnswer and are excluded
+        // from the accuracy signal so a few thoughtful write-ups can't inflate it.
+        if (q.correctAnswer) {
+            objectiveCount++;
+            if (ok) objectiveCorrect++;
+        }
     });
     const graded = questions.length;
     return {
         correct,
         graded,
         accuracy: graded > 0 ? correct / graded : 0,
+        // Fall back to the marks ratio only if a test somehow had no gradable items.
+        objectiveAccuracy: objectiveCount > 0 ? objectiveCorrect / objectiveCount : (graded > 0 ? correct / graded : 0),
+        objectiveCount,
         perQuestion,
     };
 }

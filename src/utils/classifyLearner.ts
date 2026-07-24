@@ -217,7 +217,13 @@ export function detectSkippingBehavior(
         accuracyScore < 0.25 &&
         overall.avgResponseTime < 20 &&
         overall.questionsAnswered < 4;
-    const tooManySkips = overall.skippedQuestions >= 2;
+    // Avoidance is a HIGH proportion of the test skipped, not a couple of hard
+    // questions left blank. Using a ratio (with an absolute floor) prevents an
+    // otherwise-engaged student who skipped 2/12 from being forced into
+    // "ignorant_avoider", which previously swallowed genuine strugglers.
+    const totalQ = overall.questionsAnswered + overall.skippedQuestions;
+    const skipRatio = totalQ > 0 ? overall.skippedQuestions / totalQ : 0;
+    const tooManySkips = overall.skippedQuestions >= 3 && skipRatio >= 0.4;
     return rushedThrough || tooManySkips;
 }
 
@@ -424,9 +430,29 @@ export function heuristicCognitiveFeatures(
     // regardless of how engaged the student was.
     const baseSelfAware = clamp01(substanceScore * 0.5 + causalScore * 0.15 + selfKw * 0.5);
     const baseLearning = clamp01(substanceScore * 0.5 + learnKw * 0.5);
-    // Gate lexical diversity by word count so a 1-word answer ("idk") — which is
-    // trivially 100% "diverse" — can't inflate creativity for a disengaged student.
-    const baseCreativity = lexicalDiversity * clamp01(words / 10) * 0.5 + clamp01(words / 60) * 0.3;
+    // Ideation breadth: distinct, substantively-filled solutions in "give N
+    // solutions" (multi-text) questions — a direct signal of resourceful thinking.
+    let solutionsFilled = 0;
+    let solutionSlots = 0;
+    questions.forEach(q => {
+        if (q.type === 'multi-text') {
+            const a = answers[q.id];
+            if (Array.isArray(a)) {
+                const filled = a.map(s => (s || '').trim().toLowerCase()).filter(s => s.length >= 4);
+                solutionsFilled += new Set(filled).size; // distinct → penalises copy-paste
+                solutionSlots += a.length;
+            }
+        }
+    });
+    const breadthScore = solutionSlots > 0 ? clamp01(solutionsFilled / solutionSlots) : 0;
+    // Gate lexical diversity by word count so a 1-word answer ("idk") — trivially
+    // 100% "diverse" — can't inflate creativity for a disengaged student. Genuine
+    // creativity blends varied vocabulary, written volume, and breadth of ideas.
+    const baseCreativity = clamp01(
+        lexicalDiversity * clamp01(words / 10) * 0.45 +
+        clamp01(words / 60) * 0.3 +
+        breadthScore * 0.25
+    );
 
     // ── FACTORS 2 & 3: BEHAVIOUR + DECISION DYNAMICS (shared with the AI blend) ─
     let { reflection_depth, self_awareness, learning_orientation, creativity_score } =
@@ -488,12 +514,14 @@ function scoreCategory(id: LearnerCategoryId, input: ClassificationInput): numbe
     const answerChanges = overall.totalAnswerChanges;
     const backtrack = overall.backtrackCount;
 
-    // Learning improvement rate across scenarios
-    const improvementRate =
-        scenarioResults.length > 1
-            ? scenarioResults[scenarioResults.length - 1].performanceScore -
-              scenarioResults[0].performanceScore
-            : 0;
+    // Learning improvement rate across scenarios (only meaningful in the
+    // multi-round AI-scenario flow; the general aptitude test and custom exam
+    // are single-round, so improvement-based clauses must NOT fire there).
+    const hasMultipleRounds = scenarioResults.length > 1;
+    const improvementRate = hasMultipleRounds
+        ? scenarioResults[scenarioResults.length - 1].performanceScore -
+          scenarioResults[0].performanceScore
+        : 0;
 
     // ANTI-CHEAT GATEKEEPER (shared with the dynamic-confidence engine)
     const isSkippingBehavior = detectSkippingBehavior(overall, accuracyScore);
@@ -567,7 +595,8 @@ function scoreCategory(id: LearnerCategoryId, input: ClassificationInput): numbe
             if (accuracyScore < 0.4) s += 0.35;
             if (confidence < 4) s += 0.25; // Widen to < 4 (only struggling if very low confidence)
             else if (confidence < 5) s += 0.15;
-            if (improvementRate < 0.05) s += 0.2;
+            if (hasMultipleRounds && improvementRate < 0.05) s += 0.2; // no improvement across rounds
+            else if (!hasMultipleRounds && accuracyScore < 0.4 && backtrack + answerChanges > 4) s += 0.15; // single-round struggle signal: effort without success
             if (cognitive.learning_orientation < 0.35) s += 0.15;
             if (skipped >= 2) s += 0.1;
             if (overtime >= 3) s += 0.1;
@@ -589,8 +618,9 @@ function scoreCategory(id: LearnerCategoryId, input: ClassificationInput): numbe
             else if (confidence >= 5) s += 0.1; // Widen to >= 5
 
             if (overall.timeTrend === 'speeding_up' || overall.timeTrend === 'stable') s += 0.15; // Widen timeTrend
-            if (improvementRate > 0.15) s += 0.2; // Widen from 0.2 to 0.15
-            else if (improvementRate > 0.05) s += 0.1;
+            if (hasMultipleRounds && improvementRate > 0.15) s += 0.2;
+            else if (hasMultipleRounds && improvementRate > 0.05) s += 0.1;
+            else if (!hasMultipleRounds && cognitive.learning_orientation > 0.6) s += 0.15; // single-round: strong growth orientation
             if (skipped === 0) s += 0.05;
             if (overtime <= 1) s += 0.05; // Widen to <= 1
             return Math.min(s, 1);
@@ -620,6 +650,9 @@ function scoreCategory(id: LearnerCategoryId, input: ClassificationInput): numbe
             if (avgTime >= 25 && avgTime <= 90) s += 0.15; // Widen to 25-90s
             if (skipped === 0) s += 0.05;
             if (overtime <= 3) s += 0.05; // Widen from <=1 to <=3
+            // A student with exceptional cognitive scores is a Strategic Thinker,
+            // not merely "steady" — step aside so strategy wins that profile.
+            if (cognitive.creativity_score > 0.65 && cognitive.reflection_depth > 0.65) s -= 0.3;
             return Math.min(s, 1);
         }
 
