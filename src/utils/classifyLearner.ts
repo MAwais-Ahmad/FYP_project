@@ -326,10 +326,14 @@ export function applyBehaviorDecisionFactors(
         if (m.backtrackCount > 1) reflection_depth += 0.1;
 
         // self_awareness ← self-correction (moderate answer changes / backtracks)
+        // AND deliberate, monitored decision-making. A focused student who answers
+        // confidently WITHOUT second-guessing should still register self-awareness,
+        // so careful (non-rushed) pacing is credited directly.
         if (m.totalAnswerChanges >= 2 && m.totalAnswerChanges <= 5) self_awareness += 0.2;
-        else if (m.totalAnswerChanges > 6) self_awareness += 0.1; // too many ≈ guessing
+        else if (m.totalAnswerChanges > 6) self_awareness += 0.05; // too many ≈ guessing
         if (m.backtrackCount > 0) self_awareness += 0.1;
-        if (m.rushedDecisions > 2) self_awareness -= 0.1;
+        if (m.rushedDecisions === 0 && m.avgResponseTime >= 25) self_awareness += 0.15;
+        if (m.rushedDecisions > 2) self_awareness -= 0.15;
 
         // learning_orientation ← engagement + respecting limits
         if (m.skippedQuestions === 0) learning_orientation += 0.2;
@@ -383,8 +387,13 @@ export function heuristicCognitiveFeatures(
 ): CognitiveFeatures {
     const { reflection } = collectAnswerText(answers, questions);
 
-    // Extract text written in reflection or text input questions
-    const textQuestions = questions.filter(q => q.type === 'reflection' || q.type === 'text' || q.type === 'multi-text');
+    // Extract text written in reflection / free-text questions. Includes custom-exam
+    // written types ('short'/'long') so the same heuristic fairly scores both the
+    // general aptitude test (text/multi-text/psych) and custom exams.
+    const textQuestions = questions.filter(q => {
+        const t = q.type as string;
+        return t === 'reflection' || t === 'text' || t === 'multi-text' || t === 'short' || t === 'long';
+    });
     let writtenText = '';
     textQuestions.forEach(q => {
         const a = answers[q.id];
@@ -403,10 +412,21 @@ export function heuristicCognitiveFeatures(
     // ── FACTOR 1: LANGUAGE — base cognitive scores from the written text ──────
     const lengthScore = clamp01(words / 45); // 45+ words of written text is a solid reflection for a scenario
     const causalScore = clamp01(keywordHits(writtenText, CAUSAL_KEYWORDS) / 2);
+    const substanceScore = clamp01(words / 40); // engaged, thoughtful written reasoning across the reflective questions
+    const selfKw = clamp01((keywordHits(writtenText, SELF_AWARE_KEYWORDS) + keywordHits(reflection, SELF_AWARE_KEYWORDS)) / 2);
+    const learnKw = clamp01(keywordHits(writtenText, LEARNING_KEYWORDS) / 2);
     const baseReflection = lengthScore * 0.6 + causalScore * 0.4;
-    const baseSelfAware = clamp01(keywordHits(reflection, SELF_AWARE_KEYWORDS) / 2);
-    const baseLearning = clamp01(keywordHits(writtenText, LEARNING_KEYWORDS) / 2);
-    const baseCreativity = lexicalDiversity * 0.5 + clamp01(words / 60) * 0.3;
+    // Self-awareness & learning: the SUBSTANCE of written reasoning is the primary
+    // base — aptitude / situational questions ("how would you handle X") rarely
+    // elicit explicit "my mistake" phrasing, so keyword hits are a bonus, not the
+    // sole driver. Previously baseSelfAware read ONLY `reflection`-type answers,
+    // which the general aptitude test never has, pinning self-awareness to ~0
+    // regardless of how engaged the student was.
+    const baseSelfAware = clamp01(substanceScore * 0.5 + causalScore * 0.15 + selfKw * 0.5);
+    const baseLearning = clamp01(substanceScore * 0.5 + learnKw * 0.5);
+    // Gate lexical diversity by word count so a 1-word answer ("idk") — which is
+    // trivially 100% "diverse" — can't inflate creativity for a disengaged student.
+    const baseCreativity = lexicalDiversity * clamp01(words / 10) * 0.5 + clamp01(words / 60) * 0.3;
 
     // ── FACTORS 2 & 3: BEHAVIOUR + DECISION DYNAMICS (shared with the AI blend) ─
     let { reflection_depth, self_awareness, learning_orientation, creativity_score } =

@@ -109,7 +109,7 @@ export function CustomResultsScreen({ results, onRestart, onViewDashboard, stude
     // Dynamics. Fall back to the offline heuristic only if the grader returned none.
     const cognitive = serverCognitive
         ? blendCognitiveWithBehavior(serverCognitive, overallMetrics)
-        : heuristicCognitiveFeatures(selectedAnswers as any, [], overallMetrics);
+        : heuristicCognitiveFeatures(selectedAnswers as any, questions as any, overallMetrics);
     const confidence = calculateDynamicConfidence(overallMetrics, accuracyScore, reflectionText);
 
     // Full multi-dimensional classification engine call
