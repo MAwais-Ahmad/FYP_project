@@ -10,6 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const OPENROUTER_MODEL = 'openrouter/auto';
+const CHATBOT_OPENROUTER_MODEL = 'google/gemini-2.0-flash-exp:free';
 const OPENAI_MODEL = 'gpt-4o-mini';
 
 const openrouterClient = process.env.OPENROUTER_API_KEY
@@ -27,7 +28,7 @@ const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-// ─── HIGH-PRECISION ENGINE: Primary = OpenAI (gpt-4o-mini), Fallback = OpenRouter
+// ─── HIGH-PRECISION ENGINE: Primary = OpenAI (GPT-4), Fallback = OpenRouter
 // Powers Exam Generation, Scenario Generation, Paper Parsing, & Cognitive Auto-Grading
 async function callHighPrecisionAI(params) {
   if (openaiClient) {
@@ -51,24 +52,24 @@ async function callHighPrecisionAI(params) {
   throw new Error('No working AI API key available for high-precision tasks');
 }
 
-// ─── CHATBOT ENGINE: Primary = OpenAI (gpt-4o-mini) for accurate, concise,
-// diagnostic answers; Fallback = OpenRouter (used only if OpenAI is unavailable).
+// ─── CHATBOT ENGINE: Primary = OpenRouter (Gemini 2.0 Flash Free) for fast, free,
+// highly intelligent diagnostic answers; Fallback = OpenAI (gpt-4o-mini).
 async function callChatbotAI(params) {
-  if (openaiClient) {
+  if (openrouterClient) {
     try {
-      return await openaiClient.chat.completions.create({
+      return await openrouterClient.chat.completions.create({
         ...params,
-        model: OPENAI_MODEL,
+        model: CHATBOT_OPENROUTER_MODEL,
       });
     } catch (err) {
-      console.warn(`⚠️ Primary OpenAI (${OPENAI_MODEL}) failed: ${err.message}. Falling back to OpenRouter (${OPENROUTER_MODEL})...`);
+      console.warn(`⚠️ Primary OpenRouter Chatbot (${CHATBOT_OPENROUTER_MODEL}) failed: ${err.message}. Falling back to OpenAI (${OPENAI_MODEL})...`);
     }
   }
 
-  if (openrouterClient) {
-    return await openrouterClient.chat.completions.create({
+  if (openaiClient) {
+    return await openaiClient.chat.completions.create({
       ...params,
-      model: OPENROUTER_MODEL,
+      model: OPENAI_MODEL,
     });
   }
 
