@@ -34,6 +34,19 @@ const TYPE_META: Record<CustomQuestionType, { label: string; badge: string }> = 
 
 const DEFAULT_TYPE_MARKS = { mcq: MARKS_PER_MCQ, short: MARKS_PER_SHORT, long: MARKS_PER_LONG };
 
+const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+// Label hand-written MCQ options as "A) …","B) …",… so the exam UI's letter badge
+// and the letter-based answer key match. Idempotent, and it strips any existing
+// "X) " the teacher may have typed so a raw "very hard" becomes "A) very hard"
+// instead of losing its first characters to the badge.
+const withOptionLetters = (options: string[]): string[] =>
+    options.map((opt, i) => {
+        const letter = OPTION_LETTERS[i] || String.fromCharCode(65 + i);
+        const text = String(opt ?? '').replace(/^\s*[A-Za-z]\)\s*/, '').trim();
+        return `${letter}) ${text}`;
+    });
+
 // Reusable editor for a list of hand-written questions (MCQ / short / long).
 // Used both for the standalone Custom Paper manual mode and for the "add your own
 // questions" section of the AI-material hybrid exam. When perTypeMarks is given,
@@ -206,7 +219,7 @@ export function AssessmentSetupScreen({
         const finalExam: GeneratedExam = {
             ...exam,
             questions,
-            durationSeconds: timerEnabled ? Math.max(60, Math.round(durationMinutes * 60)) : undefined,
+            durationSeconds: timerEnabled ? Math.max(60, Math.round((Number(durationMinutes) || 0) * 60)) : undefined,
             timerMode,
         };
         if (sessionAuthor && onAuthorCustomExam) onAuthorCustomExam(finalExam);
@@ -251,8 +264,18 @@ export function AssessmentSetupScreen({
     // timerMode: 'auto-submit' force-submits at zero; 'soft' keeps going into
     // overtime so late answers are still captured as behavioural data.
     const [timerEnabled, setTimerEnabled] = useState(true);
-    const [durationMinutes, setDurationMinutes] = useState(20);
+    // Held as number | '' so the field can be fully cleared while typing (the user
+    // deletes the default and types their own duration). An empty/zero value is
+    // caught by timerError() before any exam is generated or started.
+    const [durationMinutes, setDurationMinutes] = useState<number | ''>(20);
     const [timerMode, setTimerMode] = useState<'auto-submit' | 'soft'>('auto-submit');
+
+    // The timer, when enabled, must be a real duration (>= 1 minute). Returns an
+    // error message to show, or '' when valid — mirrors the required-title check.
+    const timerError = (): string =>
+        timerEnabled && (durationMinutes === '' || Number(durationMinutes) < 1)
+            ? 'Please set the exam timer to at least 1 minute, or turn the timer off.'
+            : '';
 
     // Preview state
     const [previewExam, setPreviewExam] = useState<GeneratedExam | null>(null);
@@ -313,6 +336,8 @@ export function AssessmentSetupScreen({
     // ─── Parse uploaded paper ───
     const handleParsePaper = async () => {
         if (!extractedText.trim()) return;
+        const tErr = timerError();
+        if (tErr) { setUploadError(tErr); return; }
         setIsParsing(true);
         setUploadError('');
 
@@ -327,8 +352,8 @@ export function AssessmentSetupScreen({
         }
     };
 
-    // Teacher's own questions that are actually filled in (valid), with marks set
-    // by the current per-type marks. Merged into the AI-generated exam.
+    // Teacher's own questions that are actually filled in (valid). Each keeps its
+    // OWN per-question marks (editable in the hybrid editor), clamped for safety.
     const validBonusQuestions = (): CustomExamQuestion[] =>
         bonusQuestions
             .filter(q => {
@@ -336,7 +361,11 @@ export function AssessmentSetupScreen({
                 if (q.type === 'mcq') return q.options.every(o => o.trim());
                 return true;
             })
-            .map(q => ({ ...q, marks: q.type === 'mcq' ? mcqMarks : q.type === 'long' ? longMarks : shortMarks }));
+            .map(q => ({
+                ...q,
+                marks: Math.max(1, Math.min(20, q.marks || 1)),
+                options: q.type === 'mcq' ? withOptionLetters(q.options) : q.options,
+            }));
 
     // ─── Generate exam from material (AI questions + teacher's own, merged) ───
     const handleGenerateExam = async () => {
@@ -359,6 +388,8 @@ export function AssessmentSetupScreen({
             setGenerateError(`Please request at most ${MAX_TOTAL_QUESTIONS} AI questions in total.`);
             return;
         }
+        const tErr = timerError();
+        if (tErr) { setGenerateError(tErr); return; }
         setIsGenerating(true);
         setGenerateError('');
 
@@ -385,6 +416,8 @@ export function AssessmentSetupScreen({
 
     // ─── Manual entry ───
     const handleStartManualExam = () => {
+        const tErr = timerError();
+        if (tErr) { setUploadError(tErr); return; }
         const valid = manualQuestions
             .filter(q => {
                 if (!q.question.trim()) return false;
@@ -392,8 +425,13 @@ export function AssessmentSetupScreen({
                 return true; // written questions only need a prompt
             })
             // Renumber ids sequentially so they match what the server expects when
-            // grading, even if some questions were skipped.
-            .map((q, i) => ({ ...q, id: i + 1 }));
+            // grading, even if some questions were skipped. Label MCQ options so the
+            // letter badge / answer key line up (and no characters are eaten).
+            .map((q, i) => ({
+                ...q,
+                id: i + 1,
+                options: q.type === 'mcq' ? withOptionLetters(q.options) : q.options,
+            }));
         if (valid.length === 0) return;
         const total = valid.reduce((sum, q) => sum + q.marks, 0);
         deliverCustomExam({
@@ -411,16 +449,16 @@ export function AssessmentSetupScreen({
     };
 
     const manualTotalMarks = manualQuestions.reduce((s, q) => s + q.marks, 0);
-    // AI-material tab totals — include the teacher's own (bonus) questions.
+    // AI-material tab totals — include the teacher's own (bonus) questions, which
+    // now carry their OWN per-question marks (a true hybrid paper).
     const bonusValid = bonusQuestions.filter(q => q.question.trim() && (q.type !== 'mcq' || q.options.every(o => o.trim())));
-    const bonusMcq = bonusValid.filter(q => q.type === 'mcq').length;
-    const bonusShort = bonusValid.filter(q => q.type === 'short').length;
-    const bonusLong = bonusValid.filter(q => q.type === 'long').length;
+    const bonusMarksTotal = bonusValid.reduce((s, q) => s + Math.max(1, q.marks || 1), 0);
     const genTotalCount = mcqCount + shortCount + longCount + bonusValid.length;
     const genTotalMarks =
-        (mcqCount + bonusMcq) * mcqMarks +
-        (shortCount + bonusShort) * shortMarks +
-        (longCount + bonusLong) * longMarks;
+        mcqCount * mcqMarks +
+        shortCount * shortMarks +
+        longCount * longMarks +
+        bonusMarksTotal;
     const genOverLimit = (mcqCount + shortCount + longCount) > MAX_TOTAL_QUESTIONS;
 
     // Shared timer-settings card, used by both the Custom Paper and AI Material tabs.
@@ -447,10 +485,15 @@ export function AssessmentSetupScreen({
                         <span className="text-sm text-white/70">Total time</span>
                         <input
                             type="number"
-                            min={1}
+                            min={0}
                             max={240}
                             value={durationMinutes}
-                            onChange={(e) => setDurationMinutes(Math.max(1, Math.min(240, Number(e.target.value) || 1)))}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === '') { setDurationMinutes(''); return; }
+                                setDurationMinutes(Math.max(0, Math.min(240, Number(v) || 0)));
+                            }}
+                            placeholder="e.g. 20"
                             className="text-input text-sm w-24 text-center"
                         />
                         <span className="text-sm text-white/50">minutes</span>
@@ -790,6 +833,12 @@ export function AssessmentSetupScreen({
                         <div className="space-y-4">
                             <ManualQuestionsEditor questions={manualQuestions} onChange={setManualQuestions} />
 
+                            {uploadError && (
+                                <div className="glass-card p-4 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl text-sm">
+                                    <p className="text-white/80 text-xs leading-relaxed">{uploadError.replace(/^🤖\s*AITA\s*AI\s*Assistant:\s*/i, '')}</p>
+                                </div>
+                            )}
+
                             <div className="glass-card p-4 flex items-center justify-between flex-wrap gap-2">
                                 <div className="text-sm text-white/60">
                                     <span className="font-semibold text-white">{manualQuestions.length}</span> questions •{' '}
@@ -990,13 +1039,12 @@ export function AssessmentSetupScreen({
                         <div>
                             <h3 className="font-semibold">✍️ Add Your Own Questions <span className="text-white/40 text-sm font-normal">(optional)</span></h3>
                             <p className="text-xs text-white/40 mt-1">
-                                Mix in your favourite questions. They're merged with the AI ones, use the marks set above, and are ordered MCQ → short → long.
+                                Mix in your favourite questions with their own marks. They're merged with the AI ones (ordered MCQ → short → long), and the AI is told to avoid generating anything similar to them.
                             </p>
                         </div>
                         <ManualQuestionsEditor
                             questions={bonusQuestions}
                             onChange={setBonusQuestions}
-                            perTypeMarks={{ mcq: mcqMarks, short: shortMarks, long: longMarks }}
                         />
                     </div>
 

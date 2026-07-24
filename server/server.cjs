@@ -740,12 +740,19 @@ function stripSessionAssessment(assessment) {
       exam: {
         examTitle: assessment.exam.examTitle,
         totalMarks: assessment.exam.totalMarks,
+        // Preserve the creator's overall timer so participants see the countdown
+        // and get the same auto-submit / overtime behaviour.
+        durationSeconds: assessment.durationSeconds || undefined,
+        timerMode: assessment.timerMode || undefined,
         questions: (assessment.exam.questions || []).map(q => ({
           id: q.id,
           type: q.type,
           marks: q.marks,
           question: q.question,
           options: q.options || [],
+          // Keep the profiling-probe flag so probes render as "not graded"
+          // instead of a confusing "0 Mark" real question.
+          ...(q.probe ? { probe: true } : {}),
         })),
       },
     };
@@ -778,7 +785,7 @@ app.post('/api/sessions/:id/assessment', requireAuth, async (req, res) => {
     if (kind === 'custom-exam') {
       // Resolve the FULL exam (with answer key): from the server-side exam store
       // (AI-generated / parsed) or from an inline manually-authored exam.
-      const { examId, exam: inlineExam } = req.body;
+      const { examId, exam: inlineExam, durationSeconds, timerMode } = req.body;
       let fullExam = null;
       if (examId && examStore.has(examId)) {
         fullExam = examStore.get(examId).exam;
@@ -793,7 +800,13 @@ app.post('/api/sessions/:id/assessment', requireAuth, async (req, res) => {
         return res.status(400).json({ success: false, error: 'No valid exam was provided to attach.' });
       }
       fullExam.totalMarks = fullExam.questions.reduce((s, q) => s + q.marks, 0);
-      assessment = { kind: 'custom-exam', exam: fullExam, createdAt: new Date().toISOString() };
+      // Persist the creator's overall timer (from the payload, or the inline exam)
+      // so every participant gets the same countdown + auto-submit/overtime mode.
+      const dur = Number.isFinite(durationSeconds)
+        ? durationSeconds
+        : (inlineExam && Number.isFinite(inlineExam.durationSeconds) ? inlineExam.durationSeconds : null);
+      const tMode = (timerMode || (inlineExam && inlineExam.timerMode)) || null;
+      assessment = { kind: 'custom-exam', exam: fullExam, durationSeconds: dur, timerMode: tMode, createdAt: new Date().toISOString() };
     } else if (kind === 'ai-scenario') {
       const { scenario, questions, difficultyLevel } = req.body;
       if (!scenario || !Array.isArray(questions) || questions.length === 0) {
@@ -1388,6 +1401,22 @@ function storeExam(fullExam) {
 const DEFAULT_MARKS = { mcq: 1, short: 3, long: 6 };
 const WRITTEN_TYPES = new Set(['short', 'long']);
 const TYPE_ORDER = { mcq: 0, short: 1, long: 2 }; // display grouping order
+const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+// Ensure MCQ options are labelled "A) …","B) …",… so the client's letter badge
+// (option.charAt(0)) and the letter-based answer key line up. Idempotent: an
+// option already prefixed "X) " is re-labelled by position, and a raw option like
+// "very hard" becomes "A) very hard" instead of having its first characters
+// mistaken for the label (which previously ate the first two characters and broke
+// grading for hand-written MCQs).
+function ensureOptionLetters(options) {
+  if (!Array.isArray(options)) return [];
+  return options.map((opt, i) => {
+    const letter = OPTION_LETTERS[i] || String.fromCharCode(65 + i);
+    const text = String(opt == null ? '' : opt).replace(/^\s*[A-Za-z]\)\s*/, '').trim();
+    return `${letter}) ${text}`;
+  });
+}
 
 // Normalize raw AI/parser question objects into a consistent, validated shape.
 // - reorder=true  → group by type (MCQ → short → long) and renumber ids 1..N.
@@ -1401,7 +1430,9 @@ function normalizeExamQuestions(rawQuestions, { reorder = false } = {}) {
   let items = rawQuestions
     .map((q) => {
       const type = WRITTEN_TYPES.has(q.type) ? q.type : 'mcq';
-      const marks = Math.max(1, parseInt(q.marks, 10) || DEFAULT_MARKS[type]);
+      const isProbe = !!q.probe;
+      // Probes are marks-free reflection prompts; never clamp them up to 1.
+      const marks = isProbe ? 0 : Math.max(1, parseInt(q.marks, 10) || DEFAULT_MARKS[type]);
       const question = String(q.question || '').trim();
       const origId = q.id;
       if (WRITTEN_TYPES.has(type)) {
@@ -1413,6 +1444,7 @@ function normalizeExamQuestions(rawQuestions, { reorder = false } = {}) {
           options: [],
           keyPoints: Array.isArray(q.keyPoints) ? q.keyPoints.map(String) : [],
           explanation: q.explanation ? String(q.explanation) : '',
+          ...(isProbe ? { probe: true } : {}),
         };
       }
       return {
@@ -1420,9 +1452,10 @@ function normalizeExamQuestions(rawQuestions, { reorder = false } = {}) {
         type: 'mcq',
         marks,
         question,
-        options: Array.isArray(q.options) ? q.options.map(String) : [],
+        options: ensureOptionLetters(Array.isArray(q.options) ? q.options : []),
         correctAnswer: (q.correctAnswer || '').toString().trim().charAt(0).toUpperCase(),
         explanation: q.explanation ? String(q.explanation) : '',
+        ...(isProbe ? { probe: true } : {}),
       };
     })
     .filter(q => q.question.length > 0 && (q.type !== 'mcq' || q.options.length >= 2));
@@ -1497,7 +1530,7 @@ const TYPE_SPEC = {
 // under-deliver on large single-batch requests, we retry (with an avoid-list to
 // prevent duplicates) until we hit the count or run out of attempts. Returns
 // { questions, tokens }. Generating one type per call keeps the model on-count.
-async function generateQuestionsForType(materialText, type, count, difficulty, marksOverride) {
+async function generateQuestionsForType(materialText, type, count, difficulty, marksOverride, avoidExternal = []) {
   if (count < 1) return { questions: [], tokens: 0 };
   const marks = Number.isFinite(marksOverride) ? marksOverride : DEFAULT_MARKS[type];
   const collected = [];
@@ -1505,13 +1538,17 @@ async function generateQuestionsForType(materialText, type, count, difficulty, m
 
   for (let attempt = 0; attempt < 3 && collected.length < count; attempt++) {
     const need = count - collected.length;
-    const avoid = collected.map(q => q.question);
+    // Avoid duplicating (a) questions already generated this run and (b) the
+    // teacher's own hand-written questions, so the paper never overlaps them.
+    const avoid = [...avoidExternal, ...collected.map(q => q.question)].filter(Boolean);
     const avoidNote = avoid.length
-      ? `\nDo NOT repeat or paraphrase any of these already-created questions:\n- ${avoid.join('\n- ')}`
+      ? `\nThe exam ALREADY contains the questions below (some written by the teacher). Do NOT repeat, paraphrase, translate, or create anything that overlaps with them in concept — cover different points instead:\n- ${avoid.join('\n- ')}`
       : '';
 
-    const prompt = `You are an expert exam generator. Based ONLY on the study material below, generate EXACTLY ${need} question(s), all of ${TYPE_SPEC[type](marks)}
-Produce the full count of ${need}. Every question must be derived from the material and be distinct from the others.
+    const prompt = `You are an expert exam generator. Generate EXACTLY ${need} distinct question(s), all of ${TYPE_SPEC[type](marks)}
+Base the questions primarily on the study material below.
+If the material is too brief or narrow to yield ${need} genuinely distinct questions on its own, do NOT pad with near-duplicates or trivial rewordings. Instead, creatively expand around the SAME topics: approach each concept from different angles (definitions, applications, real-world scenarios, comparisons, cause/effect, edge cases, worked examples) and closely-related sub-topics a course on this material would reasonably cover. Every question must stay on-topic, factually correct, self-contained, and educationally sound — never invent facts that contradict the material.
+Produce the full count of ${need}, all distinct from one another.
 
 DIFFICULTY LEVEL: ${String(difficulty).toUpperCase()}
 ${DIFFICULTY_INSTRUCTIONS[difficulty] || DIFFICULTY_INSTRUCTIONS.normal}${avoidNote}
@@ -1571,13 +1608,11 @@ app.post('/api/generate-exam', async (req, res) => {
     const sMarks = clampMarks(shortMarks, DEFAULT_MARKS.short);
     const lMarks = clampMarks(longMarks, DEFAULT_MARKS.long);
 
-    // Teacher's own hand-written questions (full, with answer keys). Marks already
-    // set client-side per type, but re-clamped here for safety.
+    // Teacher's own hand-written questions (full, with answer keys). Each keeps its
+    // OWN per-question marks (a true hybrid paper); normalizeExamQuestions already
+    // clamps marks to a sane range.
     const manual = Array.isArray(manualQuestions)
-      ? normalizeExamQuestions(manualQuestions, { reorder: false }).map(q => ({
-          ...q,
-          marks: q.type === 'mcq' ? mMarks : q.type === 'long' ? lMarks : sMarks,
-        }))
+      ? normalizeExamQuestions(manualQuestions, { reorder: false })
       : [];
 
     const totalRequested = mcqCount + shortCount + longCount;
@@ -1592,11 +1627,15 @@ app.post('/api/generate-exam', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Please provide study material text (at least 20 characters).' });
     }
 
+    // The teacher's own question texts — handed to the generator so the AI avoids
+    // producing anything similar to them.
+    const teacherQuestionTexts = manual.map(q => q.question).filter(Boolean);
+
     // Generate all three types concurrently, each guaranteed to its count.
     const [mcqRes, shortRes, longRes] = await Promise.all([
-      generateQuestionsForType(materialText, 'mcq', mcqCount, difficulty, mMarks),
-      generateQuestionsForType(materialText, 'short', shortCount, difficulty, sMarks),
-      generateQuestionsForType(materialText, 'long', longCount, difficulty, lMarks),
+      generateQuestionsForType(materialText, 'mcq', mcqCount, difficulty, mMarks, teacherQuestionTexts),
+      generateQuestionsForType(materialText, 'short', shortCount, difficulty, sMarks, teacherQuestionTexts),
+      generateQuestionsForType(materialText, 'long', longCount, difficulty, lMarks, teacherQuestionTexts),
     ]);
 
     // Merge AI-generated with the teacher's own, then group MCQ→short→long + renumber.
@@ -2421,16 +2460,24 @@ app.post('/api/records', async (req, res) => {
       }
     });
 
-    // If there's a sessionId, link this record to the session membership
+    // If there's a sessionId, link this record to the session membership (or create host membership)
     if (recordData.sessionId && req.user) {
       try {
-        await prisma.sessionMember.updateMany({
+        await prisma.sessionMember.upsert({
           where: {
-            sessionId: recordData.sessionId,
-            userId: req.user.id
+            sessionId_userId: {
+              sessionId: recordData.sessionId,
+              userId: req.user.id
+            }
           },
-          data: { recordId: savedRecord.id }
+          update: { recordId: savedRecord.id },
+          create: {
+            sessionId: recordData.sessionId,
+            userId: req.user.id,
+            recordId: savedRecord.id
+          }
         });
+        console.log(`🔗 Linked record ${savedRecord.id} to session ${recordData.sessionId} for user ${req.user.name}`);
       } catch (linkErr) {
         console.warn('⚠️ Could not link record to session:', linkErr.message);
       }

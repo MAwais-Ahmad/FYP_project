@@ -287,10 +287,15 @@ export function SessionDashboard({
                             </div>
                             <div className="flex flex-wrap gap-3">
                                 <button onClick={openPreview} className="btn-secondary !py-2.5 !px-5">👁️ Preview</button>
-                                <button onClick={() => onTakeAssessment(sessionId)} className="btn-primary !py-2.5 !px-5">✍️ Attempt it myself</button>
+                                <button onClick={() => onTakeAssessment(sessionId)} className="btn-primary !py-2.5 !px-5">✍️ {me.completed ? 'Re-attempt' : 'Attempt it myself'}</button>
+                                {me.completed && me.record && (
+                                    <button onClick={viewMyResult} className="btn-primary !py-2.5 !px-5 !bg-emerald-600 hover:!bg-emerald-500">📊 View My Result</button>
+                                )}
                                 <button onClick={() => onCreateAssessment(sessionId)} className="btn-secondary !py-2.5 !px-5 !text-amber-300 hover:!bg-amber-500/10">♻️ Replace</button>
                             </div>
-                            <p className="text-[11px] text-white/40">Attempting is optional — your own attempt is graded like any participant's.</p>
+                            <p className="text-[11px] text-white/40">
+                                {me.completed ? '✅ You have completed your attempt for this session. Your score is listed at the top of the Participants list below.' : 'Attempting is optional — your own attempt is graded like any participant\'s.'}
+                            </p>
                         </div>
                     )}
                 </div>
@@ -367,24 +372,49 @@ export function SessionDashboard({
                         </div>
                     ) : (
                         <div className="space-y-2">
-                            {members.map((member) => {
-                                const record = toStudentRecord(member.record, member.user.name);
-                                if (record) {
-                                    return <RecordBlock key={member.id} record={record} onClick={() => onViewRecord(record)} showName />;
-                                }
-                                return (
-                                    <div key={member.id} className="w-full glass-card p-4 flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center text-xl shrink-0">⏳</div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="font-semibold">{member.user.name}</div>
-                                            <div className="text-xs text-white/40">
-                                                Joined {new Date(member.joinedAt).toLocaleDateString()} • {hasAssessment ? 'Not attempted yet' : 'Waiting for assessment'}
+                            {[...members]
+                                .sort((a, b) => {
+                                    const aIsHost = a.user.id === session.host.id;
+                                    const bIsHost = b.user.id === session.host.id;
+                                    if (aIsHost && a.status === 'completed') return -1;
+                                    if (bIsHost && b.status === 'completed') return 1;
+                                    if (aIsHost) return -1;
+                                    if (bIsHost) return 1;
+                                    if (a.status === 'completed' && b.status !== 'completed') return -1;
+                                    if (a.status !== 'completed' && b.status === 'completed') return 1;
+                                    return 0;
+                                })
+                                .map((member) => {
+                                    const isHostMember = member.user.id === session.host.id;
+                                    const displayName = isHostMember
+                                        ? `${member.user.name} 👑 (Host)`
+                                        : member.user.name;
+                                    const record = toStudentRecord(member.record, displayName);
+                                    if (record) {
+                                        return (
+                                            <RecordBlock
+                                                key={member.id}
+                                                record={record}
+                                                onClick={() => onViewRecord(record)}
+                                                showName
+                                            />
+                                        );
+                                    }
+                                    return (
+                                        <div key={member.id} className="w-full glass-card p-4 flex items-center gap-4">
+                                            <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center text-xl shrink-0">
+                                                {isHostMember ? '👑' : '⏳'}
                                             </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-semibold">{displayName}</div>
+                                                <div className="text-xs text-white/40">
+                                                    Joined {new Date(member.joinedAt).toLocaleDateString()} • {hasAssessment ? 'Not attempted yet' : 'Waiting for assessment'}
+                                                </div>
+                                            </div>
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">Pending</span>
                                         </div>
-                                        <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">Pending</span>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
                         </div>
                     )}
                 </div>

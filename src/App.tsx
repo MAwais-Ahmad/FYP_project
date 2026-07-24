@@ -222,8 +222,11 @@ function App() {
         if (!activeSessionId) return;
         setSessionBusy(true);
         setSessionError('');
+        // For the examId path the paper lives server-side, so the timer settings
+        // (set client-side) must be sent alongside it; the inline path already
+        // carries them on the exam object.
         const payload = exam.examId
-            ? { kind: 'custom-exam', examId: exam.examId }
+            ? { kind: 'custom-exam', examId: exam.examId, durationSeconds: exam.durationSeconds, timerMode: exam.timerMode }
             : { kind: 'custom-exam', exam };
         const res = await setSessionAssessment(activeSessionId, payload);
         setSessionBusy(false);
@@ -565,7 +568,7 @@ function App() {
                     onRestart={handleRestart}
                     onViewDashboard={
                         currentUser
-                            ? () => setScreen('user-dashboard')
+                            ? () => (activeSessionId ? setScreen('session-dashboard') : setScreen('user-dashboard'))
                             : undefined
                     }
                     sessionId={activeSessionId}
@@ -604,7 +607,7 @@ function App() {
                     totalCost={0}
                     onRestart={handleGeneralRestart}
                     onViewDashboard={
-                        currentUser ? () => setScreen('user-dashboard') : undefined
+                        currentUser ? () => (activeSessionId ? setScreen('session-dashboard') : setScreen('user-dashboard')) : undefined
                     }
                     sessionId={activeSessionId}
                 />
@@ -627,7 +630,7 @@ function App() {
                     onRestart={handleRestart}
                     onViewDashboard={
                         currentUser
-                            ? () => setScreen('user-dashboard')
+                            ? () => (activeSessionId ? setScreen('session-dashboard') : setScreen('user-dashboard'))
                             : undefined
                     }
                     studentName={currentUser?.name}
