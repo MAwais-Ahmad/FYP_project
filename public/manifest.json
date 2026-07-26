@@ -4,25 +4,38 @@
   "description": "AI-Powered Adaptive Behavioral Learning Diagnostics and Assessment System.",
   "icons": [
     {
-      "src": "/brain.svg",
-      "type": "image/svg+xml",
-      "sizes": "any",
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
       "purpose": "any"
     },
     {
-      "src": "/brain.svg",
-      "type": "image/svg+xml",
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
       "sizes": "192x192",
       "purpose": "maskable"
     },
     {
-      "src": "/brain.svg",
-      "type": "image/svg+xml",
+      "src": "/icon-512.png",
+      "type": "image/png",
       "sizes": "512x512",
       "purpose": "maskable"
+    },
+    {
+      "src": "/brain.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
     }
   ],
   "start_url": "/",
+  "scope": "/",
   "background_color": "#0b0f19",
   "theme_color": "#6366f1",
   "display": "standalone",

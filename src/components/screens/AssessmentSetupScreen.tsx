@@ -17,7 +17,7 @@ interface AssessmentSetupScreenProps {
     onAuthorGeneralQuiz?: () => void;
 }
 
-type SetupTab = 'select-mode' | 'custom-paper' | 'ai-material';
+type SetupTab = 'select-mode' | 'hybrid';
 
 const MARKS_PER_MCQ = 1;
 const MARKS_PER_SHORT = 3;
@@ -36,20 +36,22 @@ const DEFAULT_TYPE_MARKS = { mcq: MARKS_PER_MCQ, short: MARKS_PER_SHORT, long: M
 const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
 // Label hand-written MCQ options as "A) …","B) …",… so the exam UI's letter badge
-// and the letter-based answer key match. Idempotent, and it strips any existing
-// "X) " the teacher may have typed so a raw "very hard" becomes "A) very hard"
-// instead of losing its first characters to the badge.
+// and the letter-based answer key match.
 const withOptionLetters = (options: string[]): string[] =>
     options.map((opt, i) => {
         const letter = OPTION_LETTERS[i] || String.fromCharCode(65 + i);
-        const text = String(opt ?? '').replace(/^\s*[A-Za-z]\)\s*/, '').trim();
+        const text = String(opt ?? '').replace(/^\s*[A-Za-z][\)\.\:\-]\s*/, '').trim();
         return `${letter}) ${text}`;
     });
 
-// Reusable editor for a list of hand-written questions (MCQ / short / long).
-// Used both for the standalone Custom Paper manual mode and for the "add your own
-// questions" section of the AI-material hybrid exam. When perTypeMarks is given,
-// each question's marks are governed by its type (no per-question marks input).
+// Sort questions into MCQ -> Short -> Long order and renumber IDs sequentially 1..N
+const sortQuestionsByType = (questions: CustomExamQuestion[]): CustomExamQuestion[] => {
+    const order: Record<CustomQuestionType, number> = { mcq: 0, short: 1, long: 2 };
+    const sorted = [...questions].sort((a, b) => (order[a.type] ?? 0) - (order[b.type] ?? 0));
+    return sorted.map((q, idx) => ({ ...q, id: idx + 1 }));
+};
+
+// Reusable editor for a list of hand-written / extracted questions (MCQ / short / long).
 function ManualQuestionsEditor({
     questions,
     onChange,
@@ -68,7 +70,7 @@ function ManualQuestionsEditor({
             type === 'mcq'
                 ? { ...base, type: 'mcq', options: ['', '', '', ''], correctAnswer: 'A' }
                 : { ...base, type, options: [], keyPoints: [''] };
-        onChange([...questions, q]);
+        onChange(sortQuestionsByType([...questions, q]));
     };
     const updateQ = (index: number, field: string, value: any) => {
         const updated = [...questions];
@@ -87,7 +89,7 @@ function ManualQuestionsEditor({
         updated[qi] = { ...updated[qi], keyPoints: kp };
         onChange(updated);
     };
-    const remove = (index: number) => onChange(questions.filter((_, i) => i !== index).map((q, i) => ({ ...q, id: i + 1 })));
+    const remove = (index: number) => onChange(sortQuestionsByType(questions.filter((_, i) => i !== index)));
 
     return (
         <div className="space-y-4">
@@ -98,47 +100,46 @@ function ManualQuestionsEditor({
                             <h3 className="font-semibold text-sm text-primary-300">Question {qi + 1}</h3>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full ${TYPE_META[q.type].badge}`}>{TYPE_META[q.type].label}</span>
                         </div>
+
                         <div className="flex items-center gap-2">
-                            {perTypeMarks ? (
-                                <span className="text-xs text-white/40">{markFor(q.type)} mark{markFor(q.type) > 1 ? 's' : ''}</span>
-                            ) : (
-                                <>
-                                    <label className="text-xs text-white/40">Marks:</label>
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        max={20}
-                                        value={q.marks}
-                                        onChange={(e) => updateQ(qi, 'marks', parseInt(e.target.value) || 1)}
-                                        className="text-input !w-16 !py-1 text-center text-sm"
-                                    />
-                                </>
-                            )}
-                            {questions.length > 1 && (
-                                <button onClick={() => remove(qi)} className="text-red-400 hover:text-red-300 text-sm px-2">✕</button>
-                            )}
+                            <label className="text-xs text-white/40">Marks:</label>
+                            <input
+                                type="number"
+                                min={1}
+                                max={20}
+                                value={q.marks}
+                                onChange={(e) => updateQ(qi, 'marks', Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+                                className="text-input text-xs w-16 text-center"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => remove(qi)}
+                                className="text-xs text-red-400 hover:text-red-300 ml-2"
+                            >
+                                ✕ Delete
+                            </button>
                         </div>
                     </div>
 
                     <input
                         type="text"
-                        placeholder="Enter question text..."
                         value={q.question}
                         onChange={(e) => updateQ(qi, 'question', e.target.value)}
+                        placeholder={`Enter ${TYPE_META[q.type].label.toLowerCase()} question text...`}
                         className="text-input text-sm"
                     />
 
                     {q.type === 'mcq' ? (
                         <>
-                            <div className="grid grid-cols-2 gap-2">
-                                {['A', 'B', 'C', 'D'].map((letter, oi) => (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                {q.options.map((opt, oi) => (
                                     <input
-                                        key={letter}
+                                        key={oi}
                                         type="text"
-                                        placeholder={`${letter}) Option...`}
-                                        value={q.options[oi]}
+                                        value={opt.replace(/^\s*[A-Za-z][\)\.\:\-]\s*/, '')}
                                         onChange={(e) => updateOpt(qi, oi, e.target.value)}
-                                        className="text-input text-sm"
+                                        placeholder={`Option ${String.fromCharCode(65 + oi)}...`}
+                                        className="text-input text-xs"
                                     />
                                 ))}
                             </div>
@@ -183,18 +184,30 @@ function ManualQuestionsEditor({
                         <div className="space-y-2">
                             <label className="text-xs text-white/40">Model answer key points (used for AI grading)</label>
                             {(q.keyPoints || ['']).map((kp, ki) => (
-                                <input
-                                    key={ki}
-                                    type="text"
-                                    placeholder={`Key point ${ki + 1}...`}
-                                    value={kp}
-                                    onChange={(e) => updateKP(qi, ki, e.target.value)}
-                                    className="text-input text-sm"
-                                />
+                                <div key={ki} className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={kp}
+                                        onChange={(e) => updateKP(qi, ki, e.target.value)}
+                                        placeholder={`Key point ${ki + 1} for AI grading...`}
+                                        className="text-input text-xs"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const updated = (q.keyPoints || []).filter((_, i) => i !== ki);
+                                            updateQ(qi, 'keyPoints', updated.length ? updated : ['']);
+                                        }}
+                                        className="text-xs text-white/30 hover:text-white/60 px-2"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
                             ))}
                             <button
+                                type="button"
                                 onClick={() => updateQ(qi, 'keyPoints', [...(q.keyPoints || []), ''])}
-                                className="text-xs text-primary-300 hover:text-primary-200"
+                                className="text-xs text-primary-300 hover:underline"
                             >
                                 + Add key point
                             </button>
@@ -203,14 +216,14 @@ function ManualQuestionsEditor({
                 </div>
             ))}
 
-            <div className="flex gap-2 flex-wrap">
-                <button onClick={() => add('mcq')} className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20">
+            <div className="flex gap-2 flex-wrap pt-1">
+                <button onClick={() => add('mcq')} className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20 text-xs">
                     + Add MCQ
                 </button>
-                <button onClick={() => add('short')} className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20">
+                <button onClick={() => add('short')} className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20 text-xs">
                     + Add Short Question
                 </button>
-                <button onClick={() => add('long')} className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20">
+                <button onClick={() => add('long')} className="flex-1 min-w-[120px] glass-card p-3 text-center text-white/50 hover:text-white/80 hover:bg-white/10 transition-all border-2 border-dashed border-white/10 hover:border-white/20 text-xs">
                     + Add Long Question
                 </button>
             </div>
@@ -230,14 +243,11 @@ export function AssessmentSetupScreen({
     const [tab, setTab] = useState<SetupTab>('select-mode');
 
     // Route a finished custom exam either to the session (author) or the taker.
-    // Attaches the creator's timer settings and, for manual (client-owned) exams,
-    // appends the marks-free cognitive probes. AI-generated / parsed exams already
-    // carry the probes from the server (their answer key lives server-side).
     const deliverCustomExam = (exam: GeneratedExam) => {
         const questions = exam.examId ? exam.questions : appendCognitiveProbes(exam.questions);
         const finalExam: GeneratedExam = {
             ...exam,
-            questions,
+            questions: sortQuestionsByType(questions),
             durationSeconds: timerEnabled ? Math.max(60, Math.round((Number(durationMinutes) || 0) * 60)) : undefined,
             timerMode,
         };
@@ -245,7 +255,7 @@ export function AssessmentSetupScreen({
         else onStartCustomExam(finalExam);
     };
 
-    // Custom Paper state
+    // Document / Camera scan file upload state
     const [extractedText, setExtractedText] = useState('');
     const [isUploading, setIsUploading] = useState(false);
     const [isParsing, setIsParsing] = useState(false);
@@ -253,68 +263,112 @@ export function AssessmentSetupScreen({
     const [paperFiles, setPaperFiles] = useState<string[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Manual entry state (supports MCQ + written questions)
+    // Live Questions Workspace (manual + extracted questions)
     const [manualQuestions, setManualQuestions] = useState<CustomExamQuestion[]>([
         { id: 1, type: 'mcq', marks: 1, question: '', options: ['', '', '', ''], correctAnswer: 'A', explanation: '' },
     ]);
 
-    // AI Material state
+    // AI Generator state
+    const [showAiConfig, setShowAiConfig] = useState(false);
     const [materialText, setMaterialText] = useState('');
-    const [mcqCount, setMcqCount] = useState(8);
-    const [shortCount, setShortCount] = useState(2);
+    const [mcqCount, setMcqCount] = useState(0);
+    const [shortCount, setShortCount] = useState(0);
     const [longCount, setLongCount] = useState(0);
-    // Editable per-type marks (teacher can change; defaults 1/3/6).
-    const [mcqMarks, setMcqMarks] = useState(MARKS_PER_MCQ);
-    const [shortMarks, setShortMarks] = useState(MARKS_PER_SHORT);
-    const [longMarks, setLongMarks] = useState(MARKS_PER_LONG);
-    // Teacher's own hand-written questions merged into the AI-generated exam.
-    const [bonusQuestions, setBonusQuestions] = useState<CustomExamQuestion[]>([]);
+    const mcqMarks = MARKS_PER_MCQ;
+    const shortMarks = MARKS_PER_SHORT;
+    const longMarks = MARKS_PER_LONG;
     const [difficulty, setDifficulty] = useState<ExamDifficulty>('normal');
     const [additionalInstructions, setAdditionalInstructions] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
     const [generateError, setGenerateError] = useState('');
-    const [materialFiles, setMaterialFiles] = useState<string[]>([]);
     const materialFileRef = useRef<HTMLInputElement>(null);
 
-    // Exam / Subject Title state (Mandatory for tracking & AI Chatbot queries)
+    // Title state
     const [examTitle, setExamTitle] = useState('');
 
-    // Overall exam timer (creator-set). durationMinutes drives the countdown.
-    // timerMode: 'auto-submit' force-submits at zero; 'soft' keeps going into
-    // overtime so late answers are still captured as behavioural data.
+    // Timer state
     const [timerEnabled, setTimerEnabled] = useState(true);
-    // Held as number | '' so the field can be fully cleared while typing (the user
-    // deletes the default and types their own duration). An empty/zero value is
-    // caught by timerError() before any exam is generated or started.
     const [durationMinutes, setDurationMinutes] = useState<number | ''>(20);
     const [timerMode, setTimerMode] = useState<'auto-submit' | 'soft'>('auto-submit');
 
-    // The timer, when enabled, must be a real duration (>= 1 minute). Returns an
-    // error message to show, or '' when valid — mirrors the required-title check.
     const timerError = (): string =>
         timerEnabled && (durationMinutes === '' || Number(durationMinutes) < 1)
             ? 'Please set the exam timer to at least 1 minute, or turn the timer off.'
             : '';
 
-    // Preview state
+    // Preview state & editing with Undo/Redo history
     const [previewExam, setPreviewExam] = useState<GeneratedExam | null>(null);
+    const [editingPreviewId, setEditingPreviewId] = useState<number | null>(null);
+    const [previewHistory, setPreviewHistory] = useState<GeneratedExam[]>([]);
+    const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
-    // ─── Document Upload Handler ───
-    // Custom Paper accepts a single file; AI-material accepts up to 7.
-    const handleDocUpload = async (files: FileList, target: 'paper' | 'material') => {
+    const updatePreviewWithHistory = (newExam: GeneratedExam) => {
+        const nextHistory = previewHistory.slice(0, historyIndex + 1);
+        nextHistory.push(newExam);
+        setPreviewHistory(nextHistory);
+        setHistoryIndex(nextHistory.length - 1);
+        setPreviewExam(newExam);
+    };
+
+    const handleUndoPreview = () => {
+        if (historyIndex > 0) {
+            const newIndex = historyIndex - 1;
+            setHistoryIndex(newIndex);
+            setPreviewExam(previewHistory[newIndex]);
+        }
+    };
+
+    const handleRedoPreview = () => {
+        if (historyIndex < previewHistory.length - 1) {
+            const newIndex = historyIndex + 1;
+            setHistoryIndex(newIndex);
+            setPreviewExam(previewHistory[newIndex]);
+        }
+    };
+
+    const handleDeletePreviewQuestion = (qId: number) => {
+        if (!previewExam) return;
+        const filtered = previewExam.questions.filter(q => q.id !== qId);
+        const sorted = sortQuestionsByType(filtered);
+        const newTotalMarks = sorted.reduce((sum, q) => sum + (q.marks || 1), 0);
+        const newExam = {
+            ...previewExam,
+            totalMarks: newTotalMarks,
+            questions: sorted
+        };
+        updatePreviewWithHistory(newExam);
+    };
+
+    const handleUpdatePreviewQuestion = (qId: number, field: keyof CustomExamQuestion, value: any) => {
+        if (!previewExam) return;
+        const updatedQuestions = previewExam.questions.map(q => {
+            if (q.id === qId) {
+                return { ...q, [field]: value };
+            }
+            return q;
+        });
+        const newTotalMarks = updatedQuestions.reduce((sum, q) => sum + (q.marks || 1), 0);
+        const newExam = {
+            ...previewExam,
+            totalMarks: newTotalMarks,
+            questions: updatedQuestions
+        };
+        updatePreviewWithHistory(newExam);
+    };
+
+    // Handle Document / Camera Scan Upload
+    const handleDocUpload = async (files: FileList | null, target: 'hybrid' | 'material') => {
+        if (!files || files.length === 0) return;
         const fileArr = Array.from(files);
-        if (fileArr.length === 0) return;
 
-        const limit = target === 'paper' ? 1 : 7;
-        if (fileArr.length > limit) {
-            const msg = target === 'paper'
-                ? 'The Custom Paper mode accepts only 1 file. Please select a single document.'
-                : 'You can upload at most 7 files for an AI material exam. Please select fewer files.';
-            if (target === 'paper') setUploadError(msg); else setGenerateError(msg);
+        if (fileArr.length > 7) {
+            const limitMsg = 'You can upload at most 7 files combined (PNG, JPG, PDF, DOCX, TXT).';
+            if (target === 'hybrid') setUploadError(limitMsg);
+            else setGenerateError(limitMsg);
             return;
         }
 
-        if (target === 'paper') {
+        if (target === 'hybrid') {
             setIsUploading(true);
             setUploadError('');
         } else {
@@ -322,37 +376,27 @@ export function AssessmentSetupScreen({
             setGenerateError('');
         }
 
-        const result = await uploadPdf(fileArr);
+        const res = await uploadPdf(fileArr);
+        if (target === 'hybrid') setIsUploading(false);
+        else setIsGenerating(false);
 
-        if (result.success && result.text) {
-            const names = fileArr.map(f => f.name);
-            const note = result.failedFiles && result.failedFiles.length
-                ? ` (couldn't read: ${result.failedFiles.join(', ')})`
-                : '';
-            if (target === 'paper') {
-                setExtractedText(result.text);
-                setPaperFiles(names);
-                setIsUploading(false);
-                if (note) setUploadError('Some files were skipped' + note);
+        if (res.success && res.text) {
+            if (target === 'hybrid') {
+                setExtractedText(res.text);
+                setPaperFiles(fileArr.map(f => f.name));
             } else {
-                setMaterialText(result.text);
-                setMaterialFiles(names);
-                setIsGenerating(false);
-                if (note) setGenerateError('Some files were skipped' + note);
+                setMaterialText(res.text);
+                setPaperFiles(fileArr.map(f => f.name));
+                setShowAiConfig(true);
             }
         } else {
-            const errMsg = result.error || 'Failed to read document(s)';
-            if (target === 'paper') {
-                setUploadError(errMsg);
-                setIsUploading(false);
-            } else {
-                setGenerateError(errMsg);
-                setIsGenerating(false);
-            }
+            const errMsg = res.error || 'Failed to extract text from file(s)';
+            if (target === 'hybrid') setUploadError(errMsg);
+            else setGenerateError(errMsg);
         }
     };
 
-    // ─── Parse uploaded paper ───
+    // Parse uploaded file into live questions editor
     const handleParsePaper = async () => {
         if (!extractedText.trim()) return;
         const tErr = timerError();
@@ -377,7 +421,7 @@ export function AssessmentSetupScreen({
                 .map((q: any, idx: number) => ({
                     id: idx + 1,
                     type: q.type || 'mcq',
-                    marks: q.marks || 1,
+                    marks: q.marks || (q.type === 'long' ? 6 : q.type === 'short' ? 3 : 1),
                     question: q.question || '',
                     options: Array.isArray(q.options) ? q.options.map((o: string) => o.replace(/^[A-D]\)\s*/, '')) : ['', '', '', ''],
                     correctAnswer: q.correctAnswer || 'A',
@@ -386,20 +430,26 @@ export function AssessmentSetupScreen({
                 }));
 
             if (parsedQs.length > 0) {
-                setManualQuestions(parsedQs);
+                setManualQuestions(prev => sortQuestionsByType([...prev.filter(q => q.question.trim()), ...parsedQs]));
             }
         } else {
             setUploadError(result.error || 'Failed to parse paper');
         }
     };
 
-    // Teacher's own questions that are actually filled in (valid). Each keeps its
-    // OWN per-question marks (editable in the hybrid editor), clamped for safety.
-    const validBonusQuestions = (): CustomExamQuestion[] =>
-        bonusQuestions
+    // Launch Unified Hybrid Exam (Manual + Scans + AI)
+    const handleLaunchUnifiedExam = async () => {
+        if (!examTitle.trim()) {
+            setGenerateError('Please enter a test/subject title (e.g. Physics Test 1)');
+            return;
+        }
+        const tErr = timerError();
+        if (tErr) { setGenerateError(tErr); return; }
+
+        const validManual = manualQuestions
             .filter(q => {
                 if (!q.question.trim()) return false;
-                if (q.type === 'mcq') return q.options.every(o => o.trim());
+                if (q.type === 'mcq') return q.options.some(o => o.trim());
                 return true;
             })
             .map(q => ({
@@ -408,29 +458,35 @@ export function AssessmentSetupScreen({
                 options: q.type === 'mcq' ? withOptionLetters(q.options) : q.options,
             }));
 
-    // ─── Generate exam from material (AI questions + teacher's own, merged) ───
-    const handleGenerateExam = async () => {
-        if (!examTitle.trim()) {
-            setGenerateError('Please enter a test/subject title (e.g. Physics Test 1)');
+        const aiRequested = mcqCount + shortCount + longCount;
+
+        // Case A: Pure Manual / Extracted Paper (No AI generation requested)
+        if (aiRequested === 0) {
+            if (validManual.length === 0) {
+                setGenerateError('Please add at least one question to your exam.');
+                return;
+            }
+            const sorted = sortQuestionsByType(validManual);
+            const totalMarks = sorted.reduce((sum, q) => sum + q.marks, 0);
+            const finalExam: GeneratedExam = {
+                examTitle: examTitle.trim(),
+                totalMarks,
+                questions: sorted,
+            };
+            setPreviewExam(finalExam);
             return;
         }
-        const bonus = validBonusQuestions();
-        const aiTotal = mcqCount + shortCount + longCount;
-        if (aiTotal + bonus.length < 1) {
-            setGenerateError('Add at least one question — set an AI count above 0 or add your own.');
+
+        // Case B: AI Material / Hybrid Exam Generation
+        if (aiRequested > 0 && materialText.trim().length < 20) {
+            setGenerateError('Please provide study material text (at least 20 characters) for AI generation, or set AI question counts to 0.');
             return;
         }
-        // AI generation needs material; teacher-only papers (aiTotal 0) don't.
-        if (aiTotal > 0 && materialText.trim().length < 20) {
-            setGenerateError('Please provide study material (or set all AI counts to 0 and add your own questions).');
-            return;
-        }
-        if (aiTotal > MAX_TOTAL_QUESTIONS) {
+        if (aiRequested > MAX_TOTAL_QUESTIONS) {
             setGenerateError(`Please request at most ${MAX_TOTAL_QUESTIONS} AI questions in total.`);
             return;
         }
-        const tErr = timerError();
-        if (tErr) { setGenerateError(tErr); return; }
+
         setIsGenerating(true);
         setGenerateError('');
 
@@ -442,68 +498,36 @@ export function AssessmentSetupScreen({
             mcqMarks,
             shortMarks,
             longMarks,
-            manualQuestions: bonus,
+            manualQuestions: validManual,
             difficulty,
             additionalInstructions,
         });
         setIsGenerating(false);
 
         if (result.success && result.exam) {
-            const finalTitle = examTitle.trim() || result.exam.examTitle || 'Generated Exam';
-            setPreviewExam({ ...result.exam, examTitle: finalTitle });
+            const finalTitle = examTitle.trim() || result.exam.examTitle || 'Generated Hybrid Exam';
+            const finalExam = { ...result.exam, examTitle: finalTitle };
+            setPreviewExam(finalExam);
+            setPreviewHistory([finalExam]);
+            setHistoryIndex(0);
         } else {
             setGenerateError(result.error || 'Failed to generate exam');
         }
     };
 
-    // ─── Manual entry ───
-    const handleStartManualExam = () => {
-        const tErr = timerError();
-        if (tErr) { setUploadError(tErr); return; }
-        const valid = manualQuestions
-            .filter(q => {
-                if (!q.question.trim()) return false;
-                if (q.type === 'mcq') return q.options.every(o => o.trim());
-                return true; // written questions only need a prompt
-            })
-            // Renumber ids sequentially so they match what the server expects when
-            // grading, even if some questions were skipped. Label MCQ options so the
-            // letter badge / answer key line up (and no characters are eaten).
-            .map((q, i) => ({
-                ...q,
-                id: i + 1,
-                options: q.type === 'mcq' ? withOptionLetters(q.options) : q.options,
-            }));
-        if (valid.length === 0) return;
-        const total = valid.reduce((sum, q) => sum + q.marks, 0);
-        deliverCustomExam({
-            examTitle: examTitle.trim() || 'Custom Paper',
-            totalMarks: total,
-            questions: valid,
-        });
-    };
-
-    // ─── Preview & Start ───
     const handleStartPreviewExam = () => {
-        if (previewExam) {
-            deliverCustomExam(previewExam);
-        }
+        if (!previewExam) return;
+        deliverCustomExam(previewExam);
     };
 
-    const manualTotalMarks = manualQuestions.reduce((s, q) => s + q.marks, 0);
-    // AI-material tab totals — include the teacher's own (bonus) questions, which
-    // now carry their OWN per-question marks (a true hybrid paper).
-    const bonusValid = bonusQuestions.filter(q => q.question.trim() && (q.type !== 'mcq' || q.options.every(o => o.trim())));
-    const bonusMarksTotal = bonusValid.reduce((s, q) => s + Math.max(1, q.marks || 1), 0);
-    const genTotalCount = mcqCount + shortCount + longCount + bonusValid.length;
-    const genTotalMarks =
-        mcqCount * mcqMarks +
-        shortCount * shortMarks +
-        longCount * longMarks +
-        bonusMarksTotal;
-    const genOverLimit = (mcqCount + shortCount + longCount) > MAX_TOTAL_QUESTIONS;
+    // Calculate Dynamic Marks Total
+    const bonusMarksTotal = manualQuestions
+        .filter(q => q.question.trim())
+        .reduce((sum, q) => sum + Math.max(1, Math.min(20, q.marks || 1)), 0);
+    const aiMarksTotal = mcqCount * mcqMarks + shortCount * shortMarks + longCount * longMarks;
+    const totalMarksCalculated = bonusMarksTotal + (showAiConfig ? aiMarksTotal : 0);
 
-    // Shared timer-settings card, used by both the Custom Paper and AI Material tabs.
+    // Timer controls block
     const renderTimerControls = () => (
         <div className="glass-card p-4 space-y-3 border border-accent-500/30 bg-accent-500/5">
             <div className="flex items-center justify-between">
@@ -563,87 +587,141 @@ export function AssessmentSetupScreen({
                                 ⏳ Keep going (measure overtime)
                             </button>
                         </div>
-                        <p className="text-[11px] text-white/40 mt-1.5">
-                            {timerMode === 'auto-submit'
-                                ? 'The exam submits automatically the moment the timer hits zero.'
-                                : 'The timer keeps counting into overtime — the student can finish, and the extra time is recorded as behavioural data.'}
-                        </p>
                     </div>
                 </>
             )}
         </div>
     );
 
-    // ─── RENDER ──────────────────────────────────────────────────────────────────
-
-    // Preview Screen (answers are intentionally NOT revealed here)
+    // Preview Screen
     if (previewExam) {
         return (
             <section className="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
-                <div className="floating-shape shape-1 w-96 h-96 bg-primary-500 -top-48 -left-48" />
-                <div className="floating-shape shape-2 w-72 h-72 bg-accent-500 -bottom-36 -right-36" style={{ animationDelay: '2s' }} />
-
                 <div className="max-w-3xl w-full space-y-6 relative z-10">
-                    <div className="text-center space-y-2">
-                        <h1 className="text-3xl font-bold">📋 Exam Preview</h1>
-                        <p className="text-white/60">{previewExam.examTitle}</p>
-                        <div className="flex items-center justify-center gap-4 text-sm flex-wrap">
-                            <span className="bg-primary-500/20 text-primary-300 px-3 py-1 rounded-full">
-                                {previewExam.questions.filter(q => !q.probe).length} Questions
-                            </span>
-                            <span className="bg-accent-500/20 text-accent-300 px-3 py-1 rounded-full">
-                                {previewExam.totalMarks} Total Marks
-                            </span>
-                            <span className="bg-green-500/20 text-green-300 px-3 py-1 rounded-full">
-                                🔒 Answers hidden until you finish
-                            </span>
+                    <div className="glass-card p-6 border-2 border-primary-500/40 space-y-3">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h2 className="text-2xl font-extrabold text-white">{previewExam.examTitle}</h2>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleUndoPreview}
+                                    disabled={historyIndex <= 0}
+                                    className="btn-secondary !py-1.5 !px-3 text-xs flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
+                                    title="Undo last edit or deletion"
+                                >
+                                    <span>↩️</span> Undo
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleRedoPreview}
+                                    disabled={historyIndex >= previewHistory.length - 1}
+                                    className="btn-secondary !py-1.5 !px-3 text-xs flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
+                                    title="Redo edit or deletion"
+                                >
+                                    <span>↪️</span> Redo
+                                </button>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-white/70 flex-wrap">
+                            <span>Total Questions: <strong>{previewExam.questions.filter(q => !q.probe).length}</strong></span>
+                            <span>•</span>
+                            <span>Total Marks: <strong>{previewExam.totalMarks}</strong></span>
+                            {timerEnabled && (
+                                <>
+                                    <span>•</span>
+                                    <span>Timer: <strong>{durationMinutes} mins</strong> ({timerMode})</span>
+                                </>
+                            )}
                         </div>
                     </div>
 
-                    <div className="glass-card p-5 max-h-[50vh] overflow-y-auto space-y-4">
+                    <div className="glass-card p-5 max-h-[55vh] overflow-y-auto space-y-4">
                         {previewExam.questions.filter(q => !q.probe).map((q, i) => (
-                            <div key={q.id} className="p-4 rounded-xl bg-white/5 border border-white/5 space-y-2">
-                                <div className="flex items-start gap-2">
-                                    <span className="bg-primary-500/20 text-primary-300 text-xs px-2 py-0.5 rounded-full shrink-0 mt-0.5">
-                                        Q{i + 1} ({q.marks}m)
-                                    </span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 mt-0.5 ${TYPE_META[q.type].badge}`}>
-                                        {TYPE_META[q.type].label}
-                                    </span>
-                                    <p className="text-sm text-white/90">{q.question}</p>
+                            <div key={q.id} className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3">
+                                <div className="flex items-start justify-between gap-2 flex-wrap">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="bg-primary-500/20 text-primary-300 text-xs px-2 py-0.5 rounded-full font-bold">
+                                            Q{i + 1} ({q.marks}m)
+                                        </span>
+                                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${TYPE_META[q.type].badge}`}>
+                                            {TYPE_META[q.type].label}
+                                        </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditingPreviewId(editingPreviewId === q.id ? null : q.id)}
+                                            className="text-xs text-primary-300 hover:text-primary-200 bg-primary-500/10 px-2.5 py-1 rounded-lg border border-primary-500/20"
+                                        >
+                                            {editingPreviewId === q.id ? '✓ Done' : '✏️ Edit'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDeletePreviewQuestion(q.id)}
+                                            className="text-xs text-red-400 hover:text-red-300 bg-red-500/10 px-2.5 py-1 rounded-lg border border-red-500/20"
+                                        >
+                                            🗑️ Delete
+                                        </button>
+                                    </div>
                                 </div>
+
+                                {editingPreviewId === q.id ? (
+                                    <div className="space-y-2 pt-2 border-t border-white/10">
+                                        <label className="text-xs text-white/40">Edit Question Text:</label>
+                                        <input
+                                            type="text"
+                                            value={q.question}
+                                            onChange={(e) => handleUpdatePreviewQuestion(q.id, 'question', e.target.value)}
+                                            className="text-input text-xs"
+                                        />
+                                        <div className="flex items-center gap-3 pt-1">
+                                            <label className="text-xs text-white/40">Marks:</label>
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                max={20}
+                                                value={q.marks}
+                                                onChange={(e) => handleUpdatePreviewQuestion(q.id, 'marks', Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+                                                className="text-input text-xs w-20 text-center"
+                                            />
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-white/90 font-medium">{q.question}</p>
+                                )}
+
                                 {q.type === 'mcq' && q.options.length > 0 && (
-                                    <div className="grid grid-cols-2 gap-2 pl-8">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pl-2">
                                         {q.options.map((opt, oi) => (
-                                            <div
-                                                key={oi}
-                                                className="text-xs p-2 rounded-lg border border-white/10 bg-white/5 text-white/60"
-                                            >
-                                                {opt}
+                                            <div key={oi} className="text-xs p-2 rounded-lg border border-white/10 bg-white/5 text-white/70">
+                                                {editingPreviewId === q.id ? (
+                                                    <input
+                                                        type="text"
+                                                        value={opt.replace(/^\s*[A-Za-z][\)\.\:\-]\s*/, '')}
+                                                        onChange={(e) => {
+                                                            const newOpts = [...q.options];
+                                                            newOpts[oi] = `${OPTION_LETTERS[oi]}) ${e.target.value}`;
+                                                            handleUpdatePreviewQuestion(q.id, 'options', newOpts);
+                                                        }}
+                                                        className="text-input text-xs w-full"
+                                                    />
+                                                ) : (
+                                                    opt
+                                                )}
                                             </div>
                                         ))}
                                     </div>
-                                )}
-                                {(q.type === 'short' || q.type === 'long') && (
-                                    <p className="pl-8 text-xs text-white/40 italic">
-                                        ✍️ {q.type === 'long' ? 'Long written answer required' : 'Short written answer required'}
-                                    </p>
                                 )}
                             </div>
                         ))}
                     </div>
 
                     <div className="flex gap-3 justify-center">
-                        <button
-                            onClick={() => setPreviewExam(null)}
-                            className="btn-secondary !py-3 !px-6"
-                        >
+                        <button onClick={() => setPreviewExam(null)} className="btn-secondary !py-3 !px-6">
                             ← Back to Edit
                         </button>
-                        <button
-                            onClick={handleStartPreviewExam}
-                            className="btn-primary !py-3 !px-8 text-lg"
-                        >
+                        <button onClick={handleStartPreviewExam} className="btn-primary !py-3 !px-8 text-lg">
                             {sessionAuthor ? '✅ Use This Paper for Session' : '🚀 Start Exam'}
                         </button>
                     </div>
@@ -652,496 +730,349 @@ export function AssessmentSetupScreen({
         );
     }
 
-    // Mode Selection Screen
-    if (tab === 'select-mode') {
+    // Unified Hybrid Exam Studio Screen
+    if (tab === 'hybrid') {
         return (
             <section className="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
-                <div className="floating-shape shape-1 w-96 h-96 bg-primary-500 -top-48 -left-48" />
-                <div className="floating-shape shape-2 w-72 h-72 bg-accent-500 -bottom-36 -right-36" style={{ animationDelay: '2s' }} />
-
-                <div className="absolute top-4 left-4 z-20">
-                    <button onClick={onBack} className="btn-secondary !py-2 !px-4 text-sm">
-                        ← Back
-                    </button>
-                </div>
-
-                <div className="max-w-2xl w-full space-y-6 relative z-10">
-                    <div className="text-center space-y-3">
-                        <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 shadow-2xl animate-glow">
-                            <span className="text-4xl">📝</span>
-                        </div>
-                        <h1 className="text-3xl md:text-4xl font-extrabold bg-gradient-to-r from-white to-primary-200 bg-clip-text text-transparent">
-                            {sessionAuthor ? 'Create Session Assessment' : 'Choose Assessment Mode'}
+                <div className="max-w-4xl w-full space-y-6 relative z-10 my-8">
+                    {/* Header */}
+                    <div className="flex items-center justify-between">
+                        <button onClick={() => setTab('select-mode')} className="btn-secondary !py-2 !px-4 text-sm">
+                            ← Choose Mode
+                        </button>
+                        <h1 className="text-xl md:text-2xl font-extrabold bg-gradient-to-r from-white to-primary-200 bg-clip-text text-transparent">
+                            🎓 Unified Hybrid Exam Studio
                         </h1>
-                        <p className="text-white/50 text-sm">
-                            {sessionAuthor
-                                ? 'Build the paper every participant in this session will take.'
-                                : userName ? `Welcome, ${userName}` : ''}
-                        </p>
                     </div>
 
-                    <div className="grid gap-4">
-                        {/* General Aptitude Test — available for BOTH solo and session.
-                            Solo starts it immediately; a session host authors it as the
-                            shared assessment (each participant gets their own randomized
-                            attempt). */}
-                        {(sessionAuthor ? onAuthorGeneralQuiz : onStartGeneralQuiz) && (
-                            <button
-                                onClick={() => (sessionAuthor ? onAuthorGeneralQuiz?.() : onStartGeneralQuiz?.())}
-                                className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-emerald-500/30"
-                            >
-                                <div className="flex items-start gap-4">
-                                    <div className="text-4xl group-hover:scale-110 transition-transform">🧩</div>
-                                    <div className="space-y-1">
-                                        <h3 className="font-bold text-xl">General Aptitude Test</h3>
-                                        <p className="text-white/50 text-sm leading-relaxed">
-                                            A quick 12-question mix of problem-solving &amp; reflection, general knowledge, logical, verbal and visual diagram puzzles. Randomly generated so every attempt differs — instant marks + cognitive profile.
-                                        </p>
-                                        <span className="inline-block text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full mt-1">
-                                            {sessionAuthor ? 'One aptitude test for all participants' : '12 Questions · Auto-Graded'}
-                                        </span>
-                                    </div>
-                                </div>
-                            </button>
-                        )}
-
-                        {/* Custom Paper */}
-                        <button
-                            onClick={() => setTab('custom-paper')}
-                            className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-accent-500/30"
-                        >
-                            <div className="flex items-start gap-4">
-                                <div className="text-4xl group-hover:scale-110 transition-transform">📄</div>
-                                <div className="space-y-1">
-                                    <h3 className="font-bold text-xl">Custom Paper</h3>
-                                    <p className="text-white/50 text-sm leading-relaxed">
-                                        Upload one or more PDF/PPTX/DOCX exam papers, or manually enter MCQ and written questions. The system digitizes and grades it.
-                                    </p>
-                                    <span className="inline-block text-xs bg-accent-500/20 text-accent-300 px-2 py-0.5 rounded-full mt-1">
-                                        Upload or Manual Entry
-                                    </span>
-                                </div>
-                            </div>
-                        </button>
-
-                        {/* AI Material Exam */}
-                        <button
-                            onClick={() => setTab('ai-material')}
-                            className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-green-500/30"
-                        >
-                            <div className="flex items-start gap-4">
-                                <div className="text-4xl group-hover:scale-110 transition-transform">📚</div>
-                                <div className="space-y-1">
-                                    <h3 className="font-bold text-xl">AI Material-Based Exam</h3>
-                                    <p className="text-white/50 text-sm leading-relaxed">
-                                        Upload one or more study files or paste notes. AI generates a custom mix of MCQ + written questions calibrated by Bloom's Taxonomy difficulty.
-                                    </p>
-                                    <span className="inline-block text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full mt-1">
-                                        AI-Powered Generation
-                                    </span>
-                                </div>
-                            </div>
-                        </button>
-                    </div>
-                </div>
-            </section>
-        );
-    }
-
-    // Custom Paper Tab
-    // Custom Paper Tab (Unified File Upload + Manual Question Editor)
-    if (tab === 'custom-paper') {
-        return (
-            <section className="min-h-screen p-4 md:p-6 relative overflow-hidden">
-                <div className="floating-shape shape-1 w-96 h-96 bg-primary-500 -top-48 -left-48" />
-                <div className="floating-shape shape-2 w-72 h-72 bg-accent-500 -bottom-36 -right-36" style={{ animationDelay: '2s' }} />
-
-                <div className="max-w-3xl mx-auto space-y-6 relative z-10 pb-16">
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div className="flex items-center gap-3">
-                            <button onClick={() => setTab('select-mode')} className="btn-secondary !py-2 !px-4 text-sm">
-                                ← Back
-                            </button>
-                            <h1 className="text-2xl font-bold">📄 Custom Paper</h1>
+                    {/* Section 1: Title & Overall Timer */}
+                    <div className="glass-card p-5 space-y-4">
+                        <div>
+                            <label className="text-xs font-semibold text-white/70 uppercase tracking-wider">Exam / Subject Title</label>
+                            <input
+                                type="text"
+                                value={examTitle}
+                                onChange={(e) => setExamTitle(e.target.value)}
+                                placeholder="e.g. Computer Networks - Midterm Exam"
+                                className="text-input text-sm mt-1"
+                            />
                         </div>
-                        <span className="text-xs text-primary-300 bg-primary-500/10 px-3 py-1 rounded-full border border-primary-500/20">
-                            🔒 Original Paper Fidelity (Teacher Paper)
-                        </span>
+                        {renderTimerControls()}
                     </div>
 
-                    {/* Mandatory Exam / Subject Title Card */}
-                    <div className="glass-card p-4 space-y-2 border border-primary-500/30 bg-primary-500/5">
-                        <label className="text-xs font-semibold text-primary-300 uppercase tracking-wider flex items-center gap-1">
-                            <span>📌</span> Test / Subject Title (Required)
-                        </label>
-                        <input
-                            type="text"
-                            placeholder="e.g. Physics Test 1, CS101 Midterm, Chemistry Quiz..."
-                            value={examTitle}
-                            onChange={(e) => setExamTitle(e.target.value)}
-                            className="text-input text-sm font-medium"
-                        />
-                    </div>
-
-                    {renderTimerControls()}
-
-                    {/* File Upload Section (Optional Document Source) */}
-                    <div className="glass-card p-5 space-y-3 border border-white/10">
-                        <div className="flex items-center justify-between">
-                            <h3 className="font-semibold text-sm flex items-center gap-2">
-                                <span>📤</span> Upload Exam Paper or Scan <span className="text-white/40 font-normal text-xs">(optional)</span>
+                    {/* Section 2: Upload File / Camera Scan (Optional) */}
+                    <div className="glass-card p-5 space-y-3">
+                        <div>
+                            <h3 className="font-semibold text-base flex items-center gap-2">
+                                <span>📄</span> Upload Document or Camera Scan <span className="text-xs font-normal text-white/40">(PDF, DOCX, TXT, PNG, JPG)</span>
                             </h3>
-                            {paperFiles.length > 0 && (
-                                <span className="text-xs text-green-300 bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/20">
-                                    {paperFiles[0]}
-                                </span>
-                            )}
+                            <p className="text-xs text-white/40 mt-0.5">
+                                Upload an existing test paper or camera scan photo to automatically extract and digitize its questions.
+                            </p>
                         </div>
-                        <div
-                            className="p-6 border-2 border-dashed border-white/20 hover:border-primary-500/40 transition-all cursor-pointer text-center rounded-xl bg-white/5"
-                            onClick={() => fileInputRef.current?.click()}
-                        >
+
+                        <div className="flex items-center gap-3 flex-wrap">
                             <input
                                 ref={fileInputRef}
                                 type="file"
-                                accept=".pdf,.pptx,.ppt,.docx,.txt,.png,.jpg,.jpeg,.webp,.gif,.bmp,image/*"
+                                accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp,image/*"
+                                multiple
+                                onChange={(e) => handleDocUpload(e.target.files, 'hybrid')}
                                 className="hidden"
-                                onChange={(e) => {
-                                    if (e.target.files && e.target.files.length) handleDocUpload(e.target.files, 'paper');
-                                }}
                             />
-                            {isUploading ? (
-                                <div className="space-y-2">
-                                    <div className="text-3xl animate-spin">⏳</div>
-                                    <p className="text-white/60 text-xs">Extracting text & Vision-OCR from document/image...</p>
-                                </div>
-                            ) : paperFiles.length > 0 ? (
-                                <div className="space-y-1">
-                                    <div className="text-2xl">✅</div>
-                                    <p className="text-green-300 font-semibold text-xs">{paperFiles[0]}</p>
-                                    <p className="text-white/40 text-[11px]">Click to replace file</p>
-                                </div>
-                            ) : (
-                                <div className="space-y-1">
-                                    <div className="text-2xl">📤</div>
-                                    <p className="text-white/70 font-medium text-xs">Click to upload exam paper or image scan</p>
-                                    <p className="text-white/40 text-[11px]">PDF, Word (.docx), Image (PNG, JPG), PowerPoint, TXT (Max 15MB)</p>
-                                </div>
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isUploading || isParsing}
+                                className="btn-secondary !py-2.5 !px-4 text-xs flex items-center gap-2"
+                            >
+                                <span>📷</span> {isUploading ? 'Extracting File Text...' : 'Upload File / Photo Scan'}
+                            </button>
+                            {paperFiles.length > 0 && (
+                                <span className="text-xs text-green-400 font-medium">
+                                    ✓ {paperFiles.length} file(s) attached
+                                </span>
                             )}
                         </div>
 
-                        {extractedText && (
-                            <div className="p-3 rounded-xl bg-white/5 space-y-2 border border-white/5">
-                                <h4 className="font-semibold text-xs text-white/70">📖 Extracted Text Preview</h4>
-                                <pre className="text-[11px] text-white/50 max-h-24 overflow-y-auto whitespace-pre-wrap bg-black/20 p-2 rounded-lg">
-                                    {extractedText.substring(0, 800)}
-                                    {extractedText.length > 800 && '...'}
-                                </pre>
+                        {uploadError && (
+                            <p className="text-xs text-red-400">⚠️ {uploadError}</p>
+                        )}
+
+                        {extractedText.trim() && (
+                            <div className="pt-2">
                                 <button
+                                    type="button"
                                     onClick={handleParsePaper}
                                     disabled={isParsing}
-                                    className="btn-secondary w-full !py-2 text-xs disabled:opacity-50 !text-primary-300 hover:!bg-primary-500/10"
+                                    className="btn-primary !py-2 !px-4 text-xs flex items-center gap-2 bg-gradient-to-r from-amber-500 to-primary-500"
                                 >
-                                    {isParsing ? (
-                                        <><span className="animate-spin">🤖</span> AI is extracting questions into editor below...</>
-                                    ) : (
-                                        '🔍 Extract Questions into Editor Below'
-                                    )}
+                                    <span>⚡</span> {isParsing ? 'Parsing Questions into Editor...' : 'Extract Questions into Live Editor'}
                                 </button>
                             </div>
                         )}
                     </div>
 
-                    {uploadError && (
-                        <div className="glass-card p-4 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl space-y-2 text-sm">
-                            <div className="flex items-center gap-2 font-bold text-amber-300">
-                                <span className="text-xl">🤖</span> AITA AI Assistant Guidance
-                            </div>
-                            <p className="text-white/80 text-xs leading-relaxed">{uploadError.replace(/^🤖\s*AITA\s*AI\s*Assistant:\s*/i, '')}</p>
-                        </div>
-                    )}
-
-                    {/* Manual & Extracted Questions Editor */}
-                    <div className="space-y-3">
+                    {/* Section 3: Collapsible AI Generator Card */}
+                    <div className="glass-card p-5 space-y-4">
                         <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="font-semibold text-base flex items-center gap-2">
+                                    <span>⚙️</span> AI Question Generator & Directives
+                                </h3>
+                                <p className="text-xs text-white/40 mt-0.5">
+                                    Paste study notes or set sliders to let AI generate additional questions.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowAiConfig(v => !v)}
+                                className={`text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1 ${
+                                    showAiConfig
+                                        ? 'bg-primary-500/30 text-primary-200 border-primary-500/50'
+                                        : 'bg-white/5 text-white/60 hover:bg-white/10 border-white/10'
+                                }`}
+                            >
+                                {showAiConfig ? '▲ Collapse AI Generator' : '🤖 + Expand AI Generator'}
+                            </button>
+                        </div>
+
+                        {showAiConfig && (
+                            <div className="space-y-4 pt-3 border-t border-white/10">
+                                <div>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="text-xs text-white/60">Study Material / Lecture Notes</label>
+                                        <button
+                                            type="button"
+                                            onClick={() => materialFileRef.current?.click()}
+                                            className="text-[11px] text-primary-300 hover:underline flex items-center gap-1"
+                                        >
+                                            <span>📁</span> Upload Study Notes File (PDF, DOCX, TXT)
+                                        </button>
+                                        <input
+                                            ref={materialFileRef}
+                                            type="file"
+                                            accept=".pdf,.docx,.txt"
+                                            multiple
+                                            onChange={(e) => handleDocUpload(e.target.files, 'material')}
+                                            className="hidden"
+                                        />
+                                    </div>
+                                    <textarea
+                                        value={materialText}
+                                        onChange={(e) => setMaterialText(e.target.value)}
+                                        placeholder="Paste lecture notes or chapter text here for AI generation..."
+                                        className="text-input text-xs min-h-[90px]"
+                                    />
+                                </div>
+
+                                <div className="space-y-3 bg-white/5 p-4 rounded-xl border border-white/5">
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between text-xs">
+                                            <span className="text-white/80">Multiple-Choice Questions (MCQ)</span>
+                                            <span className="text-primary-300 font-bold">{mcqCount}</span>
+                                        </div>
+                                        <input type="range" min={0} max={40} value={mcqCount} onChange={(e) => setMcqCount(parseInt(e.target.value))} className="w-full accent-primary-500" />
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between text-xs">
+                                            <span className="text-white/80">Short-Answer Questions</span>
+                                            <span className="text-fuchsia-300 font-bold">{shortCount}</span>
+                                        </div>
+                                        <input type="range" min={0} max={20} value={shortCount} onChange={(e) => setShortCount(parseInt(e.target.value))} className="w-full accent-fuchsia-500" />
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between text-xs">
+                                            <span className="text-white/80">Long-Answer / Essay Questions</span>
+                                            <span className="text-amber-300 font-bold">{longCount}</span>
+                                        </div>
+                                        <input type="range" min={0} max={15} value={longCount} onChange={(e) => setLongCount(parseInt(e.target.value))} className="w-full accent-amber-500" />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-xs text-white/70">AI Difficulty Level <span className="text-white/40 font-normal">(Applies strictly to AI-generated questions)</span></label>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {([
+                                            { key: 'easy', label: '🟢 Easy', desc: 'Direct Recall & Definitions' },
+                                            { key: 'normal', label: '🟡 Normal', desc: 'Applied Theory Scenarios' },
+                                            { key: 'hard', label: '🔴 Hard', desc: 'Complex Scenarios & Distractors' },
+                                        ] as const).map((d) => (
+                                            <button
+                                                key={d.key}
+                                                type="button"
+                                                onClick={() => setDifficulty(d.key)}
+                                                className={`p-2.5 rounded-xl text-center transition-all border ${
+                                                    difficulty === d.key
+                                                        ? 'border-primary-500/50 bg-primary-500/20 text-white shadow-lg'
+                                                        : 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10'
+                                                }`}
+                                            >
+                                                <div className="text-xs font-semibold">{d.label}</div>
+                                                <div className="text-[10px] text-white/40 mt-0.5">{d.desc}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2 pt-2 border-t border-white/10">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-xs font-semibold text-white/80 uppercase tracking-wider flex items-center gap-1.5">
+                                            <span>💬</span> Additional AI Instructions / Directives <span className="text-white/40 font-normal text-[10px] lowercase">(optional)</span>
+                                        </label>
+                                        <span className="text-xs text-white/40">
+                                            {additionalInstructions.trim() ? additionalInstructions.trim().split(/\s+/).filter(Boolean).length : 0} / 50 words
+                                        </span>
+                                    </div>
+                                    <textarea
+                                        value={additionalInstructions}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            const words = val.trim().split(/\s+/).filter(Boolean);
+                                            if (words.length <= 50 || val.length < additionalInstructions.length) {
+                                                setAdditionalInstructions(val);
+                                            }
+                                        }}
+                                        placeholder="e.g. 'Focus on cybersecurity protocols', 'Include Python code snippets'..."
+                                        className="text-input text-xs min-h-[60px] resize-y"
+                                        rows={2}
+                                    />
+                                    <p className="text-[11px] text-amber-300/80 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
+                                        ⚡ <strong>Priority Rule Active:</strong> Appears ONLY for AI-generated questions. Overrides default difficulty presets.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Section 4: Live Questions Workspace */}
+                    <div className="glass-card p-5 space-y-4">
+                        <div>
                             <h3 className="font-semibold text-base flex items-center gap-2">
-                                <span>✏️</span> Exam Questions Editor
+                                <span>✍️</span> Live Questions Workspace <span className="text-xs font-normal text-white/40">(Manual + Extracted + AI)</span>
                             </h3>
-                            <span className="text-xs text-white/40">
-                                {manualQuestions.length} Question{manualQuestions.length === 1 ? '' : 's'} • {manualTotalMarks} Marks Total
-                            </span>
+                            <p className="text-xs text-white/40 mt-0.5">
+                                Add, edit, or remove questions. Questions are automatically ordered: <strong>MCQ → Short → Long</strong>.
+                            </p>
                         </div>
 
-                        <ManualQuestionsEditor questions={manualQuestions} onChange={setManualQuestions} />
-                    </div>
-
-                    {/* Unified Footer Summary & Action Bar */}
-                    <div className="glass-card p-4 flex items-center justify-between flex-wrap gap-3 border border-primary-500/20 bg-white/5 sticky bottom-4 z-20 shadow-2xl">
-                        <div className="text-sm text-white/70 space-y-0.5">
-                            <div className="font-semibold text-white flex items-center gap-2 text-base">
-                                <span>📝 {manualQuestions.filter(q => q.question.trim()).length} Question{manualQuestions.filter(q => q.question.trim()).length === 1 ? '' : 's'}</span>
-                                <span className="text-white/20">•</span>
-                                <span className="text-primary-300">{manualTotalMarks} Total Marks</span>
-                            </div>
-                            <div className="text-xs text-white/40">
-                                Timer: {timerEnabled ? `${durationMinutes} mins (${timerMode})` : 'Disabled'}
-                            </div>
-                        </div>
-                        <button
-                            onClick={handleStartManualExam}
-                            disabled={manualQuestions.filter(q => q.question.trim()).length === 0}
-                            className="btn-primary !py-3 !px-8 text-base shadow-lg disabled:opacity-50"
-                        >
-                            {sessionAuthor ? '✅ Use for Session' : '🚀 Start Exam'}
-                        </button>
-                    </div>
-                </div>
-            </section>
-        );
-    }
-
-    // AI Material Tab
-    if (tab === 'ai-material') {
-        return (
-            <section className="min-h-screen p-4 md:p-6 relative overflow-hidden">
-                <div className="floating-shape shape-1 w-96 h-96 bg-primary-500 -top-48 -left-48" />
-                <div className="floating-shape shape-2 w-72 h-72 bg-accent-500 -bottom-36 -right-36" style={{ animationDelay: '2s' }} />
-
-                <div className="max-w-3xl mx-auto space-y-6 relative z-10 pb-16">
-                    <div className="flex items-center gap-3">
-                        <button onClick={() => setTab('select-mode')} className="btn-secondary !py-2 !px-4 text-sm">
-                            ← Back
-                        </button>
-                        <h1 className="text-2xl font-bold">📚 AI Material-Based Exam</h1>
-                    </div>
-
-                    {/* Mandatory Exam / Subject Title Card */}
-                    <div className="glass-card p-4 space-y-2 border border-green-500/30 bg-green-500/5">
-                        <label className="text-xs font-semibold text-green-300 uppercase tracking-wider flex items-center gap-1">
-                            <span>📌</span> Test / Subject Title (Required for Tracking & AI Queries)
-                        </label>
-                        <input
-                            type="text"
-                            placeholder="e.g. Physics Test 1, CS101 Quiz 2, Operating Systems Final..."
-                            value={examTitle}
-                            onChange={(e) => setExamTitle(e.target.value)}
-                            className="text-input text-sm font-medium"
+                        <ManualQuestionsEditor
+                            questions={manualQuestions}
+                            onChange={setManualQuestions}
                         />
-                    </div>
 
-                    {renderTimerControls()}
-
-                    {/* Material Input */}
-                    <div className="space-y-4">
-                        <div
-                            className="glass-card p-6 border-2 border-dashed border-white/20 hover:border-green-500/40 transition-all cursor-pointer text-center"
-                            onClick={() => materialFileRef.current?.click()}
-                        >
-                            <input
-                                ref={materialFileRef}
-                                type="file"
-                                multiple
-                                accept=".pdf,.pptx,.ppt,.docx,.txt,.png,.jpg,.jpeg,.webp,.gif,.bmp,image/*"
-                                className="hidden"
-                                onChange={(e) => {
-                                    if (e.target.files && e.target.files.length) handleDocUpload(e.target.files, 'material');
-                                }}
-                            />
-                            {materialFiles.length > 0 ? (
-                                <div className="space-y-1">
-                                    <div className="text-3xl">✅</div>
-                                    <p className="text-green-300 font-semibold text-sm">{materialFiles.length} file{materialFiles.length > 1 ? 's' : ''} loaded</p>
-                                    <p className="text-white/50 text-xs break-words">{materialFiles.join(', ')}</p>
-                                    <p className="text-white/40 text-xs">Click to replace</p>
-                                </div>
-                            ) : (
-                                <div className="space-y-1">
-                                    <div className="text-3xl">📤</div>
-                                    <p className="text-white/70 font-medium text-sm">Upload study files (PDF, PPTX, DOCX)</p>
-                                    <p className="text-white/40 text-xs">Up to 7 files, or paste text below</p>
-                                </div>
+                        {/* Dynamic Summary */}
+                        <div className="flex items-center gap-4 text-sm rounded-xl p-3 bg-white/5 text-white/70 border border-white/10 flex-wrap justify-between">
+                            <div className="flex items-center gap-3">
+                                <span><strong className="text-white">{manualQuestions.filter(q => q.question.trim()).length + (showAiConfig ? mcqCount + shortCount + longCount : 0)}</strong> total questions</span>
+                                <span className="text-white/20">|</span>
+                                <span><strong className="text-white">{totalMarksCalculated}</strong> total marks</span>
+                            </div>
+                            {timerEnabled && (
+                                <span className="text-xs text-accent-300 font-semibold bg-accent-500/20 px-2.5 py-1 rounded-full">
+                                    ⏱️ {durationMinutes || 0} mins ({timerMode})
+                                </span>
                             )}
                         </div>
-
-                        <div className="glass-card p-4 space-y-2">
-                            <h3 className="font-semibold text-sm">📝 Study Material / Notes</h3>
-                            <textarea
-                                value={materialText}
-                                onChange={(e) => setMaterialText(e.target.value)}
-                                placeholder="Paste or type your study material, lecture notes, or topic here..."
-                                className="text-input min-h-[150px] text-sm resize-y"
-                                rows={6}
-                            />
-                            <p className="text-white/30 text-xs text-right">{materialText.length} characters</p>
-                        </div>
-                    </div>
-
-                    {/* Exam Configuration */}
-                    <div className="glass-card p-5 space-y-5">
-                        <h3 className="font-semibold">⚙️ Exam Configuration</h3>
-
-                        <p className="text-xs text-white/40 -mt-2">Set how many of each type to AI-generate, and the marks each is worth (defaults shown — change any).</p>
-
-                        {/* MCQ Count + marks */}
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                                <label className="text-sm text-white/70">Multiple-Choice Questions (MCQ)</label>
-                                <div className="flex items-center gap-3">
-                                    <div className="flex items-center gap-1">
-                                        <input type="number" min={1} max={20} value={mcqMarks}
-                                            onChange={(e) => setMcqMarks(Math.max(1, parseInt(e.target.value) || 1))}
-                                            className="text-input !w-14 !py-1 text-center text-xs" />
-                                        <span className="text-[10px] text-white/40">m each</span>
-                                    </div>
-                                    <span className="text-lg font-bold text-sky-300 w-6 text-right">{mcqCount}</span>
-                                </div>
-                            </div>
-                            <input type="range" min={0} max={MAX_TOTAL_QUESTIONS} value={mcqCount}
-                                onChange={(e) => setMcqCount(parseInt(e.target.value))} className="w-full accent-primary-500" />
-                            <div className="flex justify-between text-xs text-white/30"><span>0</span><span>{MAX_TOTAL_QUESTIONS}</span></div>
-                        </div>
-
-                        {/* Short-Answer Count + marks */}
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                                <label className="text-sm text-white/70">Short-Answer Questions</label>
-                                <div className="flex items-center gap-3">
-                                    <div className="flex items-center gap-1">
-                                        <input type="number" min={1} max={20} value={shortMarks}
-                                            onChange={(e) => setShortMarks(Math.max(1, parseInt(e.target.value) || 1))}
-                                            className="text-input !w-14 !py-1 text-center text-xs" />
-                                        <span className="text-[10px] text-white/40">m each</span>
-                                    </div>
-                                    <span className="text-lg font-bold text-fuchsia-300 w-6 text-right">{shortCount}</span>
-                                </div>
-                            </div>
-                            <input type="range" min={0} max={20} value={shortCount}
-                                onChange={(e) => setShortCount(parseInt(e.target.value))} className="w-full accent-fuchsia-500" />
-                            <div className="flex justify-between text-xs text-white/30"><span>0</span><span>20</span></div>
-                        </div>
-
-                        {/* Long-Answer Count + marks */}
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                                <label className="text-sm text-white/70">Long-Answer / Essay Questions</label>
-                                <div className="flex items-center gap-3">
-                                    <div className="flex items-center gap-1">
-                                        <input type="number" min={1} max={20} value={longMarks}
-                                            onChange={(e) => setLongMarks(Math.max(1, parseInt(e.target.value) || 1))}
-                                            className="text-input !w-14 !py-1 text-center text-xs" />
-                                        <span className="text-[10px] text-white/40">m each</span>
-                                    </div>
-                                    <span className="text-lg font-bold text-amber-300 w-6 text-right">{longCount}</span>
-                                </div>
-                            </div>
-                            <input type="range" min={0} max={15} value={longCount}
-                                onChange={(e) => setLongCount(parseInt(e.target.value))} className="w-full accent-amber-500" />
-                            <div className="flex justify-between text-xs text-white/30"><span>0</span><span>15</span></div>
-                        </div>
-
-                        {/* Totals summary */}
-                        <div className={`flex items-center gap-3 text-sm rounded-xl p-3 flex-wrap ${genOverLimit ? 'bg-red-500/10 text-red-300 border border-red-500/20' : 'bg-white/5 text-white/60'}`}>
-                            <span><span className="font-semibold text-white">{genTotalCount}</span> questions</span>
-                            <span className="text-white/20">|</span>
-                            <span><span className="font-semibold text-white">{genTotalMarks}</span> total marks</span>
-                            {bonusValid.length > 0 && <span className="text-[11px] text-white/40">(incl. {bonusValid.length} of your own)</span>}
-                            {genOverLimit && <span className="w-full text-xs">⚠️ Max {MAX_TOTAL_QUESTIONS} AI questions — reduce a count.</span>}
-                        </div>
-
-                        {/* Difficulty */}
-                        <div className="space-y-2">
-                            <label className="text-sm text-white/70">Difficulty Level & Question Cognitive Strategy</label>
-                            <div className="grid grid-cols-3 gap-2">
-                                {([
-                                    { key: 'easy', label: '🟢 Easy', desc: 'Direct Recall & Definitions' },
-                                    { key: 'normal', label: '🟡 Normal', desc: 'Applied Theory Scenarios' },
-                                    { key: 'hard', label: '🔴 Hard', desc: 'Complex Scenarios & Distractors' },
-                                ] as const).map((d) => (
-                                    <button
-                                        key={d.key}
-                                        onClick={() => setDifficulty(d.key)}
-                                        className={`p-3 rounded-xl text-center transition-all border ${
-                                            difficulty === d.key
-                                                ? 'border-primary-500/50 bg-primary-500/20 text-white shadow-lg'
-                                                : 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10'
-                                        }`}
-                                    >
-                                        <div className="text-lg">{d.label.split(' ')[0]}</div>
-                                        <div className="text-xs font-semibold mt-1">{d.label.split(' ')[1]}</div>
-                                        <div className="text-[10px] text-white/40 mt-0.5">{d.desc}</div>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Additional AI Instructions (Highest Priority Override Directive) */}
-                        <div className="space-y-2 pt-3 border-t border-white/10">
-                            <div className="flex items-center justify-between">
-                                <label className="text-xs font-semibold text-white/80 uppercase tracking-wider flex items-center gap-1.5">
-                                    <span>💬</span> Additional AI Instructions / Directives <span className="text-white/40 font-normal text-[10px] lowercase">(optional)</span>
-                                </label>
-                                <span className="text-xs text-white/40">
-                                    {additionalInstructions.trim() ? additionalInstructions.trim().split(/\s+/).filter(Boolean).length : 0} / 50 words
-                                </span>
-                            </div>
-                            <textarea
-                                value={additionalInstructions}
-                                onChange={(e) => {
-                                    const val = e.target.value;
-                                    const words = val.trim().split(/\s+/).filter(Boolean);
-                                    if (words.length <= 50 || val.length < additionalInstructions.length) {
-                                        setAdditionalInstructions(val);
-                                    }
-                                }}
-                                placeholder="e.g. 'Focus on cybersecurity protocols', 'Include Python code snippets', 'Make questions easy with no wrong answers'..."
-                                className="text-input text-xs min-h-[65px] resize-y"
-                                rows={2}
-                            />
-                            <p className="text-[11px] text-amber-300/80 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
-                                ⚡ <strong>Priority Override Active:</strong> Instructions written here take <strong>TOP PRIORITY</strong> over default difficulty settings if a conflict occurs.
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Add your own questions (hybrid) */}
-                    <div className="glass-card p-5 space-y-3">
-                        <div>
-                            <h3 className="font-semibold">✍️ Add Your Own Questions <span className="text-white/40 text-sm font-normal">(optional)</span></h3>
-                            <p className="text-xs text-white/40 mt-1">
-                                Mix in your favourite questions with their own marks. They're merged with the AI ones (ordered MCQ → short → long), and the AI is told to avoid generating anything similar to them.
-                            </p>
-                        </div>
-                        <ManualQuestionsEditor
-                            questions={bonusQuestions}
-                            onChange={setBonusQuestions}
-                        />
                     </div>
 
                     {generateError && (
-                        <div className="glass-card p-4 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl space-y-2 text-sm">
-                            <div className="flex items-center gap-2 font-bold text-amber-300">
-                                <span className="text-xl">🤖</span> AITA AI Assistant Guidance
-                            </div>
-                            <p className="text-white/80 text-xs leading-relaxed">{generateError.replace(/^🤖\s*AITA\s*AI\s*Assistant:\s*/i, '')}</p>
+                        <div className="text-xs text-red-300 bg-red-500/20 p-3 rounded-xl border border-red-500/30">
+                            ⚠️ {generateError}
                         </div>
                     )}
 
-                    {/* Generate Button */}
                     <button
-                        onClick={handleGenerateExam}
-                        disabled={isGenerating || genTotalCount < 1 || genOverLimit}
-                        className="btn-primary w-full !py-4 text-lg disabled:opacity-50"
+                        onClick={handleLaunchUnifiedExam}
+                        disabled={isGenerating || isUploading || isParsing}
+                        className="btn-primary w-full !py-4 text-lg font-bold shadow-2xl flex items-center justify-center gap-2"
                     >
-                        {isGenerating ? (
-                            <><span className="animate-spin">🤖</span> AI is generating your exam...</>
-                        ) : (
-                            <>🚀 {sessionAuthor ? 'Create' : 'Generate'} {genTotalCount}-Question Exam</>
-                        )}
+                        <span>{sessionAuthor ? '✅' : '🚀'}</span>
+                        {isGenerating ? 'Generating & Structuring Exam...' : sessionAuthor ? 'Use This Hybrid Paper for Session' : 'Generate & Launch Hybrid Exam'}
                     </button>
                 </div>
             </section>
         );
     }
 
-    return null;
+    // Mode Selection Screen (2 CLEAN OPTIONS)
+    return (
+        <section className="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
+            <div className="floating-shape shape-1 w-96 h-96 bg-primary-500 -top-48 -left-48" />
+            <div className="floating-shape shape-2 w-72 h-72 bg-accent-500 -bottom-36 -right-36" style={{ animationDelay: '2s' }} />
+
+            <div className="absolute top-4 left-4 z-20">
+                <button onClick={onBack} className="btn-secondary !py-2 !px-4 text-sm">
+                    ← Back
+                </button>
+            </div>
+
+            <div className="max-w-2xl w-full space-y-6 relative z-10">
+                <div className="text-center space-y-3">
+                    <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 shadow-2xl animate-glow">
+                        <span className="text-4xl">🎓</span>
+                    </div>
+                    <h1 className="text-3xl md:text-4xl font-extrabold bg-gradient-to-r from-white to-primary-200 bg-clip-text text-transparent">
+                        {sessionAuthor ? 'Create Session Assessment' : 'Choose Assessment Mode'}
+                    </h1>
+                    <p className="text-white/50 text-sm">
+                        {sessionAuthor
+                            ? 'Build the paper every participant in this session will take.'
+                            : userName ? `Welcome, ${userName}` : 'Select your assessment format'}
+                    </p>
+                </div>
+
+                <div className="grid gap-4">
+                    {/* Option 1: General Aptitude Test */}
+                    {(sessionAuthor ? onAuthorGeneralQuiz : onStartGeneralQuiz) && (
+                        <button
+                            onClick={() => (sessionAuthor ? onAuthorGeneralQuiz?.() : onStartGeneralQuiz?.())}
+                            className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-emerald-500/30"
+                        >
+                            <div className="flex items-start gap-4">
+                                <div className="text-4xl group-hover:scale-110 transition-transform">🧠</div>
+                                <div className="space-y-1">
+                                    <h3 className="font-bold text-xl">General Aptitude Test</h3>
+                                    <p className="text-white/50 text-sm leading-relaxed">
+                                        A quick 12-question mix of problem-solving, logical, verbal, and visual diagram puzzles. Randomly generated for every attempt — instant marks + cognitive profile.
+                                    </p>
+                                    <span className="inline-block text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full mt-1">
+                                        {sessionAuthor ? 'One aptitude test for all participants' : '12 Questions · Auto-Graded'}
+                                    </span>
+                                </div>
+                            </div>
+                        </button>
+                    )}
+
+                    {/* Option 2: Unified Hybrid Exam Studio (Custom Paper & AI Generator) */}
+                    <button
+                        onClick={() => setTab('hybrid')}
+                        className="glass-card p-6 text-left hover:bg-white/10 transition-all group cursor-pointer border border-white/5 hover:border-primary-500/30 bg-gradient-to-r from-primary-500/10 to-accent-500/10"
+                    >
+                        <div className="flex items-start gap-4">
+                            <div className="text-4xl group-hover:scale-110 transition-transform">🎓</div>
+                            <div className="space-y-1">
+                                <h3 className="font-bold text-xl text-primary-200 flex items-center gap-2">
+                                    Unified Hybrid Exam Studio
+                                    <span className="text-[10px] bg-primary-500/30 text-primary-200 px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold border border-primary-500/40">
+                                        Custom &amp; AI
+                                    </span>
+                                </h3>
+                                <p className="text-white/60 text-sm leading-relaxed">
+                                    Upload file/scanned photo papers, type your own questions, or let AI generate questions from study notes. Supports all 4 creation modes in one workspace!
+                                </p>
+                                <div className="flex items-center gap-2 flex-wrap mt-2">
+                                    <span className="text-xs bg-accent-500/20 text-accent-300 px-2 py-0.5 rounded-full">✍️ Manual</span>
+                                    <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">📄 Photo / PDF Scans</span>
+                                    <span className="text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full">🤖 AI Material Generator</span>
+                                </div>
+                            </div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </section>
+    );
 }

@@ -1410,7 +1410,7 @@ function ensureOptionLetters(options) {
   if (!Array.isArray(options)) return [];
   return options.map((opt, i) => {
     const letter = OPTION_LETTERS[i] || String.fromCharCode(65 + i);
-    const text = String(opt == null ? '' : opt).replace(/^\s*[A-Za-z]\)\s*/, '').trim();
+    const text = String(opt == null ? '' : opt).replace(/^\s*[A-Za-z][\)\.\:\-]\s*/, '').trim();
     return `${letter}) ${text}`;
   });
 }
@@ -1556,13 +1556,16 @@ The teacher has provided explicit HIGHEST-PRIORITY INSTRUCTIONS below. You MUST 
     // teacher's own hand-written questions, so the paper never overlaps them.
     const avoid = [...avoidExternal, ...collected.map(q => q.question)].filter(Boolean);
     const avoidNote = avoid.length
-      ? `\nThe exam ALREADY contains the questions below (some written by the teacher). Do NOT repeat, paraphrase, translate, or create anything that overlaps with them in concept — cover different points instead:\n- ${avoid.join('\n- ')}`
+      ? `\nThe exam ALREADY contains the questions below (extracted from uploaded PNG/PDF files, camera scans, or written by the teacher). Do NOT repeat, paraphrase, translate, or create anything that overlaps with them in concept — cover different points instead:\n- ${avoid.join('\n- ')}`
       : '';
 
     const prompt = `You are an expert exam generator. Generate EXACTLY ${need} distinct question(s), all of ${TYPE_SPEC[type](marks)}
 Base the questions primarily on the study material below.
-If the material is too brief or narrow to yield ${need} genuinely distinct questions on its own, do NOT pad with near-duplicates or trivial rewordings. Instead, creatively expand around the SAME topics: approach each concept from different angles (definitions, applications, real-world scenarios, comparisons, cause/effect, edge cases, worked examples) and closely-related sub-topics a course on this material would reasonably cover. Every question must stay on-topic, factually correct, self-contained, and educationally sound — never invent facts that contradict the material.
-Produce the full count of ${need}, all distinct from one another.
+ZERO REDUNDANCY & DISTINCT PERSPECTIVES RULE:
+- NEVER generate near-duplicate questions, trivial rewordings, or repetitive prompts on the exact same detail.
+- Each question MUST explore a unique, distinct angle: (1) Direct Concept Definition, (2) Real-World Applied Scenario, or (3) Edge Case / Troubleshooting.
+- If two questions touch the same core topic, one MUST be a practical real-world scenario and the other a direct concept recall — NEVER two redundant recall questions on the same point.
+- If the study material is brief or narrow, creatively expand into closely-related sub-topics and practical industry applications rather than producing duplicate filler. Every question must be self-contained and educationally sound.
 
 DIFFICULTY LEVEL: ${String(difficulty).toUpperCase()}
 ${DIFFICULTY_INSTRUCTIONS[difficulty] || DIFFICULTY_INSTRUCTIONS.normal}${priorityOverrideNote}${avoidNote}
@@ -2565,7 +2568,9 @@ RULES FOR ANSWERING USER QUESTIONS:
 3. **Explaining Questions (Q1, Q3, Q9, etc.)**: Always use the EXACT question text, student's submitted answer, and expected correct answer from the "Itemized Question Diagnostic Log". NEVER output placeholder brackets like "[Insert your answer]".
 4. **Teacher / Supervisor Queries**: If asked to summarize student results or compare students (e.g. "Tell me about Haris in Physics Test 1"), summarize student performance, decision style, and key behavioral telemetry clearly.
 5. **Tone & Formatting — BE CONCISE**: Lead with a direct answer in 1-3 sentences that actually answers the question. Only add detail the user asked for. Do NOT pad responses with section headers, boilerplate, or repeated recommendations unless the question is genuinely complex or multi-part. For a simple question, a tight 2-4 sentence answer is ideal; reserve headers (### Diagnostic Breakdown, ### How AITA Measures This) for when the user explicitly asks for a deep breakdown. Never invent numbers — cite only values present in ACTIVE ASSESSMENT CONTEXT; if a value is missing, say so briefly.
-6. **Grounding & Accuracy**: Base every claim on the ACTIVE ASSESSMENT CONTEXT and DATABASE RECORDS below. When explaining why an answer was wrong, quote the student's answer and the correct answer from the Itemized Question Diagnostic Log and explain the gap in one or two sentences. When explaining why a cognitive vector is low/high, cite its exact % and the one or two telemetry factors that drove it.${formattedActiveContext}${databaseContextStr}`;
+6. **Grounding & Accuracy**: Base every claim on the ACTIVE ASSESSMENT CONTEXT and DATABASE RECORDS below. When explaining why an answer was wrong, quote the student's answer and the correct answer from the Itemized Question Diagnostic Log and explain the gap in one or two sentences. When explaining why a cognitive vector is low/high, cite its exact % and the one or two telemetry factors that drove it.
+7. **ANSWER EVERY PART OF A MULTI-PART QUESTION**: If the user asks about more than one thing in a single message (e.g. "explain Q1 and Q3 and why my speed is low", or a list of items), you MUST address ALL of them — never answer only the first and drop the rest. Structure your reply as a short numbered or bulleted list with ONE concise item per thing asked. Scan the user's message for every distinct question, item, name, or metric they mention and cover each one. If you cannot answer one part (missing data), still list it and say so in one line.
+8. **BREVITY IS MANDATORY**: Default to the shortest reply that fully answers what was asked. No preamble ("Great question!", "Let me explain..."), no restating the question, no closing summary, no unsolicited recommendations. Simple question → 1-3 sentences. Multi-part question → one tight line/bullet per part. Only go long when the user explicitly asks to "explain in detail", "break down", or "elaborate". Use markdown for structure (bullets, **bold** key terms) but keep it dense and skimmable.${formattedActiveContext}${databaseContextStr}`;
 
     const apiMessages = [
       { role: 'system', content: systemPrompt },
@@ -2577,7 +2582,8 @@ RULES FOR ANSWERING USER QUESTIONS:
     try {
       const response = await callChatbotAI({
         messages: apiMessages,
-        temperature: 0.7,
+        temperature: 0.4,
+        max_tokens: 900,
       });
       reply = response.choices?.[0]?.message?.content || '';
       totalTokensUsed += response.usage?.total_tokens || 0;

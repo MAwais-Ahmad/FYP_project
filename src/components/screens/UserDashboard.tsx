@@ -87,13 +87,17 @@ export function UserDashboard({
             if (result.success) {
                 setJoinCode('');
                 setShowJoinModal(false);
-                // Refresh sessions
-                const data = await listSessions();
-                if (data.success) {
-                    const visibleHosted = (data.hosted || []).filter((s: SessionData) => !isSessionHiddenForUser(userKey, s.id));
-                    const visibleJoined = (data.joined || []).filter((s: SessionData) => !isSessionHiddenForUser(userKey, s.id));
-                    setHostedSessions(visibleHosted);
-                    setJoinedSessions(visibleJoined);
+                const joinedId = result.membership?.sessionId;
+                if (joinedId) {
+                    onViewSession(joinedId);
+                } else {
+                    const data = await listSessions();
+                    if (data.success) {
+                        const visibleHosted = (data.hosted || []).filter((s: SessionData) => !isSessionHiddenForUser(userKey, s.id));
+                        const visibleJoined = (data.joined || []).filter((s: SessionData) => !isSessionHiddenForUser(userKey, s.id));
+                        setHostedSessions(visibleHosted);
+                        setJoinedSessions(visibleJoined);
+                    }
                 }
             } else {
                 setJoinError(result.error || 'Could not join session');

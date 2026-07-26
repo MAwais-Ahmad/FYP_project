@@ -1,5 +1,114 @@
 import { useState, useRef, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { sendChatMessage } from '../../services/api';
+
+// ─── Lightweight markdown renderer (no external deps) ────────────────────────
+// Handles **bold**, *italic*, `code`, [links](url) inline, plus headers, bullet
+// & numbered lists, and code blocks — so the AI's markdown renders cleanly
+// instead of showing raw ** and # symbols.
+function renderInline(text: string): ReactNode[] {
+    const nodes: ReactNode[] = [];
+    const regex = /(\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\*([^*\n]+)\*|\[([^\]]+)\]\(([^)]+)\))/g;
+    let lastIndex = 0;
+    let m: RegExpExecArray | null;
+    let key = 0;
+    while ((m = regex.exec(text)) !== null) {
+        if (m.index > lastIndex) nodes.push(text.slice(lastIndex, m.index));
+        if (m[2] !== undefined) nodes.push(<strong key={key++} className="font-bold text-white">{m[2]}</strong>);
+        else if (m[3] !== undefined) nodes.push(<strong key={key++} className="font-bold text-white">{m[3]}</strong>);
+        else if (m[4] !== undefined) nodes.push(<code key={key++} className="px-1 py-0.5 rounded bg-black/40 text-primary-300 font-mono text-[11px]">{m[4]}</code>);
+        else if (m[5] !== undefined) nodes.push(<em key={key++} className="italic">{m[5]}</em>);
+        else if (m[6] !== undefined) nodes.push(<a key={key++} href={m[7]} target="_blank" rel="noreferrer" className="text-primary-300 underline">{m[6]}</a>);
+        lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+    return nodes;
+}
+
+function MarkdownMessage({ content }: { content: string }) {
+    const lines = content.replace(/\r\n/g, '\n').split('\n');
+    const blocks: ReactNode[] = [];
+    let listItems: ReactNode[] = [];
+    let listType: 'ul' | 'ol' | null = null;
+    let codeBuffer: string[] = [];
+    let inCode = false;
+    let key = 0;
+
+    const flushList = () => {
+        if (listItems.length && listType) {
+            blocks.push(
+                listType === 'ol'
+                    ? <ol key={key++} className="list-decimal list-outside pl-5 space-y-1 my-1">{listItems}</ol>
+                    : <ul key={key++} className="list-disc list-outside pl-5 space-y-1 my-1">{listItems}</ul>
+            );
+        }
+        listItems = [];
+        listType = null;
+    };
+
+    lines.forEach((raw) => {
+        const line = raw;
+
+        // Fenced code block toggle
+        if (line.trim().startsWith('```')) {
+            if (!inCode) {
+                flushList();
+                inCode = true;
+                codeBuffer = [];
+            } else {
+                blocks.push(
+                    <pre key={key++} className="my-1.5 p-2.5 rounded-lg bg-black/50 border border-white/10 overflow-x-auto text-[11px] font-mono text-white/90 whitespace-pre">{codeBuffer.join('\n')}</pre>
+                );
+                inCode = false;
+            }
+            return;
+        }
+        if (inCode) { codeBuffer.push(line); return; }
+
+        const trimmed = line.trim();
+
+        // Headers
+        const h = /^(#{1,3})\s+(.*)$/.exec(trimmed);
+        if (h) {
+            flushList();
+            const sizes = ['text-sm', 'text-[13px]', 'text-xs'];
+            blocks.push(<div key={key++} className={`font-bold text-white mt-2 mb-0.5 ${sizes[h[1].length - 1]}`}>{renderInline(h[2])}</div>);
+            return;
+        }
+
+        // Bullet list
+        const bullet = /^[-*+]\s+(.*)$/.exec(trimmed);
+        if (bullet) {
+            if (listType && listType !== 'ul') flushList();
+            listType = 'ul';
+            listItems.push(<li key={key++}>{renderInline(bullet[1])}</li>);
+            return;
+        }
+
+        // Numbered list
+        const numbered = /^\d+[.)]\s+(.*)$/.exec(trimmed);
+        if (numbered) {
+            if (listType && listType !== 'ol') flushList();
+            listType = 'ol';
+            listItems.push(<li key={key++}>{renderInline(numbered[1])}</li>);
+            return;
+        }
+
+        // Blank line → paragraph break
+        if (trimmed === '') { flushList(); return; }
+
+        // Normal paragraph line
+        flushList();
+        blocks.push(<p key={key++} className="my-0.5">{renderInline(trimmed)}</p>);
+    });
+
+    flushList();
+    if (inCode && codeBuffer.length) {
+        blocks.push(<pre key={key++} className="my-1.5 p-2.5 rounded-lg bg-black/50 border border-white/10 overflow-x-auto text-[11px] font-mono text-white/90 whitespace-pre">{codeBuffer.join('\n')}</pre>);
+    }
+
+    return <div className="space-y-0.5">{blocks}</div>;
+}
 
 interface AIChatDrawerProps {
     recordContext?: any;
@@ -149,7 +258,9 @@ export function AIChatDrawer({ recordContext }: AIChatDrawerProps) {
                                             : 'bg-white/10 text-white/90 border border-white/10 rounded-bl-none shadow-md'
                                     }`}
                                 >
-                                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                                    {msg.role === 'assistant'
+                                        ? <MarkdownMessage content={msg.content} />
+                                        : <div className="whitespace-pre-wrap">{msg.content}</div>}
                                 </div>
                                 <span className="text-[9px] text-white/30 px-1 mt-1">
                                     {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
