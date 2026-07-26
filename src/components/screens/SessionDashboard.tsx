@@ -168,12 +168,36 @@ export function SessionDashboard({
     };
 
     const completedMembers = members.filter((m) => m.status === 'completed');
+    const totalMembers = members.length;
+    const completionRate = totalMembers > 0 ? Math.round((completedMembers.length / totalMembers) * 100) : 0;
+
     const avgPerformance = completedMembers.length > 0
         ? completedMembers.reduce((s, m) => s + (m.record?.performanceScore || 0), 0) / completedMembers.length
         : 0;
     const avgAccuracy = completedMembers.length > 0
         ? completedMembers.reduce((s, m) => s + (m.record?.accuracyScore || 0), 0) / completedMembers.length
         : 0;
+    const avgSpeed = completedMembers.length > 0
+        ? completedMembers.reduce((s, m) => s + (m.record?.avgResponseTime || 0), 0) / completedMembers.length
+        : 0;
+    const peakScore = completedMembers.length > 0
+        ? Math.max(...completedMembers.map((m) => m.record?.performanceScore || 0))
+        : 0;
+
+    // Calculate dominant group decision style / cognitive profile
+    const styleCounts: Record<string, number> = {};
+    completedMembers.forEach((m) => {
+        const style = m.record?.primaryName || m.record?.decisionStyle || 'Balanced';
+        styleCounts[style] = (styleCounts[style] || 0) + 1;
+    });
+    let dominantStyle = '--';
+    let maxStyleCount = 0;
+    Object.entries(styleCounts).forEach(([style, count]) => {
+        if (count > maxStyleCount) {
+            maxStyleCount = count;
+            dominantStyle = style;
+        }
+    });
 
     if (isLoading) {
         return (
@@ -242,20 +266,76 @@ export function SessionDashboard({
                     </button>
                 </div>
 
-                {/* Host summary stats */}
-                {isHost && completedMembers.length > 0 && (
-                    <div className="grid grid-cols-3 gap-4">
-                        <div className="text-center p-3 rounded-xl bg-white/5">
-                            <div className="text-2xl font-bold">{members.length}</div>
-                            <div className="text-xs text-white/40">Participants</div>
+                {/* Group Analytics & Insights Bar */}
+                {members.length > 0 && (
+                    <div className="pt-3 border-t border-white/10 space-y-3">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-xs uppercase tracking-wider font-semibold text-white/50 flex items-center gap-1.5">
+                                <span>📊</span> Group Insights & Analytics
+                            </h3>
+                            {completedMembers.length > 0 && (
+                                <span className="text-[11px] text-primary-300 bg-primary-500/10 px-2 py-0.5 rounded-full border border-primary-500/20">
+                                    {completedMembers.length} of {totalMembers} Completed ({completionRate}%)
+                                </span>
+                            )}
                         </div>
-                        <div className="text-center p-3 rounded-xl bg-white/5">
-                            <div className="text-2xl font-bold">{Math.round(avgPerformance * 100)}%</div>
-                            <div className="text-xs text-white/40">Avg Performance</div>
-                        </div>
-                        <div className="text-center p-3 rounded-xl bg-white/5">
-                            <div className="text-2xl font-bold">{Math.round(avgAccuracy * 100)}%</div>
-                            <div className="text-xs text-white/40">Avg Accuracy</div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                            <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors flex flex-col justify-between">
+                                <div className="flex items-center justify-between text-xs text-white/40 mb-1">
+                                    <span>👥 Joined</span>
+                                    <span>🎯 {completionRate}%</span>
+                                </div>
+                                <div className="text-2xl font-bold text-white">{totalMembers}</div>
+                                <div className="text-[11px] text-white/40 mt-1">{completedMembers.length} completed</div>
+                            </div>
+
+                            <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors flex flex-col justify-between">
+                                <div className="flex items-center justify-between text-xs text-white/40 mb-1">
+                                    <span>⚡ Avg Performance</span>
+                                    <span>📈</span>
+                                </div>
+                                <div className="text-2xl font-bold text-emerald-400">
+                                    {completedMembers.length > 0 ? `${Math.round(avgPerformance * 100)}%` : '--'}
+                                </div>
+                                <div className="text-[11px] text-white/40 mt-1">Group Score</div>
+                            </div>
+
+                            <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors flex flex-col justify-between">
+                                <div className="flex items-center justify-between text-xs text-white/40 mb-1">
+                                    <span>🎯 Avg Accuracy</span>
+                                    <span>✨</span>
+                                </div>
+                                <div className="text-2xl font-bold text-sky-400">
+                                    {completedMembers.length > 0 ? `${Math.round(avgAccuracy * 100)}%` : '--'}
+                                </div>
+                                <div className="text-[11px] text-white/40 mt-1">Accuracy Ratio</div>
+                            </div>
+
+                            <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors flex flex-col justify-between">
+                                <div className="flex items-center justify-between text-xs text-white/40 mb-1">
+                                    <span>⏱️ Avg Speed</span>
+                                    <span>⌛</span>
+                                </div>
+                                <div className="text-2xl font-bold text-amber-400">
+                                    {completedMembers.length > 0 ? `${avgSpeed.toFixed(1)}s` : '--'}
+                                </div>
+                                <div className="text-[11px] text-white/40 mt-1">Per Question</div>
+                            </div>
+
+                            <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors flex flex-col justify-between col-span-2 sm:col-span-1">
+                                <div className="flex items-center justify-between text-xs text-white/40 mb-1">
+                                    <span>🧠 Group Mindset</span>
+                                    {completedMembers.length > 0 && peakScore > 0 && (
+                                        <span className="text-[10px] text-emerald-400 font-semibold" title="Peak Score">
+                                            🏆 {Math.round(peakScore * 100)}%
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="text-sm font-bold text-purple-300 truncate" title={dominantStyle}>
+                                    {dominantStyle}
+                                </div>
+                                <div className="text-[11px] text-white/40 mt-1">Dominant Profile</div>
+                            </div>
                         </div>
                     </div>
                 )}

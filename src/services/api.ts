@@ -370,6 +370,7 @@ export async function generateExam(config: {
     longMarks?: number;
     manualQuestions?: any[];
     difficulty: string;
+    additionalInstructions?: string;
 }): Promise<{ success: boolean; exam?: any; error?: string }> {
     return safeApiJson(`${API_BASE}/generate-exam`, {
         method: 'POST',

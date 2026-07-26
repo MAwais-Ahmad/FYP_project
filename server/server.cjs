@@ -1119,34 +1119,30 @@ const SCENARIO_SEEDS = [
 function getDifficultyPrompt(level) {
   if (level <= 3) {
     return `DIFFICULTY: EASY (Level ${level}/10)
+    - Focus on direct recall and foundational scenario decisions
     - 3-4 stakeholders/options (fewer decisions)
-    - Clear information, no hidden details
-    - One option is subtly better than others
-    - Familiar everyday situations (college, friends, family)
+    - Clear, transparent information with zero hidden noise
     - Generous time context, low pressure`;
   }
   if (level <= 6) {
-    return `DIFFICULTY: MEDIUM (Level ${level}/10)
-    - 4-5 stakeholders/options
-    - Some ambiguous information
-    - No obviously correct answer
-    - Moderate time pressure
-    - Requires balancing multiple factors`;
+    return `DIFFICULTY: NORMAL (Level ${level}/10)
+    - Focus on applied theory inside practical real-world scenarios
+    - 4-5 stakeholders/options with moderate trade-offs
+    - Requires applying core principles rather than simple memorisation
+    - Realistic situational pressure and balanced options`;
   }
   if (level <= 8) {
     return `DIFFICULTY: HARD (Level ${level}/10)
-    - 5-6 stakeholders/options with competing needs
-    - Conflicting or incomplete information
-    - Hidden constraints that emerge mid-scenario
-    - Real time pressure
-    - Requires creative thinking and trade-offs`;
+    - Focus on complex scenarios with background noise, distractions, and red herrings
+    - 5-6 stakeholders/options with competing interests
+    - Extraneous/noisy information and hidden constraints that emerge mid-scenario
+    - Requires deep critical reasoning, filtering out distractors ("avoidants"), and trade-off synthesis`;
   }
   return `DIFFICULTY: EXPERT (Level ${level}/10)
-    - 6-7 stakeholders/options with layered conflicts
-    - Deliberately misleading or contradictory information
-    - Multiple hidden constraints
-    - High-stakes consequences for wrong decisions
-    - Requires systems thinking and strong justification`;
+    - High-stakes complex scenarios loaded with heavy noise, red herrings, and multi-variable trade-offs
+    - Deliberately misleading or contradictory information requiring sharp filtering
+    - Multiple hidden constraints and critical edge-case consequences
+    - Requires high-level systems thinking and rigorous analytical justification`;
 }
 
 // ─── ADAPTIVE DIFFICULTY CONTEXT ─────────────────────────────────────────────
@@ -1513,9 +1509,18 @@ function appendCognitiveProbes(questions) {
 }
 
 const DIFFICULTY_INSTRUCTIONS = {
-  easy: 'Focus 80% on direct recall, definitions, and basic facts. 20% on simple application. Questions should test surface-level understanding.',
-  normal: 'Balance 50% core concept questions with 50% application/scenario-based questions. Test both understanding and ability to apply knowledge.',
-  hard: 'Focus 20% on foundational constraints and 80% on critical analysis, multi-step reasoning, edge cases, and synthesis across topics. Questions should challenge deep understanding.',
+  easy: `DIFFICULTY INSTRUCTION (EASY):
+- Focus 90% on DIRECT RECALL, core definitions, formulas, terminology, and foundational facts directly present in the study material.
+- Questions MUST test surface-level memory and direct knowledge retrieval.
+- Avoid multi-step scenario problems or ambiguous situations. Keep question stems clear, concise, and straight to the point.`,
+  normal: `DIFFICULTY INSTRUCTION (NORMAL):
+- Focus 90% on APPLIED THEORY & REAL-WORLD SCENARIOS.
+- Do NOT ask simple memory recall or direct definition questions.
+- Every question MUST embed the core theory into a practical, realistic scenario or case study where the student must apply the concept to solve a problem or diagnose a situation.`,
+  hard: `DIFFICULTY INSTRUCTION (HARD):
+- Focus 100% on COMPLEX SCENARIOS WITH NOISE, EDGE CASES & RED HERINGS ("AVOIDANTS").
+- Questions MUST construct deep, multi-layered problem scenarios containing background noise (extraneous/irrelevant data, competing constraints, real-world friction).
+- For MCQs, include subtle distractor options ("avoidants") that seem plausible at first glance to trick students relying on superficial recall instead of critical analysis.`
 };
 
 const MAX_TOTAL_QUESTIONS = 40;
@@ -1531,11 +1536,19 @@ const TYPE_SPEC = {
 // under-deliver on large single-batch requests, we retry (with an avoid-list to
 // prevent duplicates) until we hit the count or run out of attempts. Returns
 // { questions, tokens }. Generating one type per call keeps the model on-count.
-async function generateQuestionsForType(materialText, type, count, difficulty, marksOverride, avoidExternal = []) {
+async function generateQuestionsForType(materialText, type, count, difficulty, marksOverride, avoidExternal = [], additionalInstructions = '') {
   if (count < 1) return { questions: [], tokens: 0 };
   const marks = Number.isFinite(marksOverride) ? marksOverride : DEFAULT_MARKS[type];
   const collected = [];
   let tokens = 0;
+
+  let priorityOverrideNote = '';
+  if (additionalInstructions && additionalInstructions.trim()) {
+    priorityOverrideNote = `\n\nCRITICAL DIRECTIVE OVERRIDE (HIGHEST PRIORITY):
+The teacher has provided explicit HIGHEST-PRIORITY INSTRUCTIONS below. You MUST satisfy these instructions as your absolute highest priority — even if they contradict, modify, or override the default difficulty level or standard formatting rules above:
+>>> TEACHER DIRECTIVE: "${additionalInstructions.trim()}" <<<
+(Enforce the above teacher directive with absolute priority over all other general guidelines.)`;
+  }
 
   for (let attempt = 0; attempt < 3 && collected.length < count; attempt++) {
     const need = count - collected.length;
@@ -1552,7 +1565,7 @@ If the material is too brief or narrow to yield ${need} genuinely distinct quest
 Produce the full count of ${need}, all distinct from one another.
 
 DIFFICULTY LEVEL: ${String(difficulty).toUpperCase()}
-${DIFFICULTY_INSTRUCTIONS[difficulty] || DIFFICULTY_INSTRUCTIONS.normal}${avoidNote}
+${DIFFICULTY_INSTRUCTIONS[difficulty] || DIFFICULTY_INSTRUCTIONS.normal}${priorityOverrideNote}${avoidNote}
 
 Respond ONLY with valid JSON: { "questions": [ { "type": "${type}", "marks": ${marks}, "question": "…", ${type === 'mcq' ? '"options": ["A) …","B) …","C) …","D) …"], "correctAnswer": "A", "explanation": "…"' : '"keyPoints": ["point 1","point 2"]'} } ] }
 
@@ -1593,7 +1606,7 @@ ${materialText.substring(0, 12000)}`;
 app.post('/api/generate-exam', async (req, res) => {
   try {
     let { materialText, mcqCount, shortCount, longCount, questionCount, difficulty = 'normal',
-          mcqMarks, shortMarks, longMarks, manualQuestions } = req.body;
+          mcqMarks, shortMarks, longMarks, manualQuestions, additionalInstructions } = req.body;
 
     // Backward-compat: an old client sending only questionCount → treat as all MCQ.
     mcqCount = Number.isFinite(mcqCount) ? mcqCount : (Number.isFinite(questionCount) ? questionCount : 10);
@@ -1634,9 +1647,9 @@ app.post('/api/generate-exam', async (req, res) => {
 
     // Generate all three types concurrently, each guaranteed to its count.
     const [mcqRes, shortRes, longRes] = await Promise.all([
-      generateQuestionsForType(materialText, 'mcq', mcqCount, difficulty, mMarks, teacherQuestionTexts),
-      generateQuestionsForType(materialText, 'short', shortCount, difficulty, sMarks, teacherQuestionTexts),
-      generateQuestionsForType(materialText, 'long', longCount, difficulty, lMarks, teacherQuestionTexts),
+      generateQuestionsForType(materialText, 'mcq', mcqCount, difficulty, mMarks, teacherQuestionTexts, additionalInstructions),
+      generateQuestionsForType(materialText, 'short', shortCount, difficulty, sMarks, teacherQuestionTexts, additionalInstructions),
+      generateQuestionsForType(materialText, 'long', longCount, difficulty, lMarks, teacherQuestionTexts, additionalInstructions),
     ]);
 
     // Merge AI-generated with the teacher's own, then group MCQ→short→long + renumber.
@@ -1840,12 +1853,14 @@ RULES:
 - A question asking for a brief written/explanatory answer (no choices) → type "short" with NO options. Add 2-3 "keyPoints" capturing what a correct answer should mention (infer them if not stated).
 - A question asking for an extended, essay-style, or multi-part explanation → type "long" with NO options. Add 4-6 "keyPoints" — the distinct valid points a full answer should cover (infer them if not stated).
 - If marks are specified per question (e.g. "[2 marks]"), use that value. Otherwise default to 1 for MCQ, 3 for short, 6 for long.
+- If total duration or time limit is specified in the document header (e.g. "Total Duration: 45 Minutes" or "Time: 1 hour"), extract durationMinutes as an integer in minutes (e.g. 45 or 60). Otherwise return null.
 - Calculate totalMarks from all questions.
 
 Respond ONLY with valid JSON in this exact shape:
 {
   "examTitle": "Parsed Exam Paper",
   "totalMarks": <number>,
+  "durationMinutes": <number or null>,
   "questions": [
     { "id": 1, "type": "mcq", "marks": 1, "question": "…?", "options": ["A) …","B) …","C) …","D) …"], "correctAnswer": "A", "explanation": "" },
     { "id": 2, "type": "short", "marks": 3, "question": "Explain …", "keyPoints": ["point 1","point 2"] },
@@ -1877,9 +1892,11 @@ ${text.substring(0, 12000)}`;
     // Append marks-free cognitive probes so the profile always has written text to score.
     const questions = appendCognitiveProbes(graded);
 
+    const parsedDuration = Number.isFinite(raw.durationMinutes) && raw.durationMinutes > 0 ? Math.round(raw.durationMinutes) : undefined;
     const fullExam = {
       examTitle: raw.examTitle || 'Parsed Exam Paper',
       totalMarks: graded.reduce((s, q) => s + q.marks, 0),
+      durationMinutes: parsedDuration,
       questions,
     };
     const examId = storeExam(fullExam);
@@ -1927,20 +1944,26 @@ app.post('/api/grade-exam', async (req, res) => {
     const graded = [];
     let mcqMarks = 0;
 
-    // 1) Auto-grade MCQs against the key.
+    // 1) Auto-grade MCQs against the key (or award full marks for AI Dynamic Decision MCQs).
     for (const q of questions) {
       if (q.type !== 'mcq') continue;
       const sel = (answers[q.id] || '').toString().trim().charAt(0).toUpperCase();
-      const correct = !!sel && sel === q.correctAnswer;
+      const isAiDynamic = (q.correctAnswer || '').toString().trim().toUpperCase() === 'AI';
+      // Any valid selected answer on an AI decision MCQ gets 100% full marks (score protection)
+      const correct = isAiDynamic ? !!sel : (!!sel && sel === q.correctAnswer);
       const awarded = correct ? q.marks : 0;
       mcqMarks += awarded;
-      graded.push({ id: q.id, awardedMarks: awarded, correct });
+      graded.push({
+        id: q.id,
+        awardedMarks: awarded,
+        correct: isAiDynamic ? true : correct,
+        feedback: isAiDynamic ? '🤖 Dynamic AI Decision Evaluation: Full credit awarded for valid choice.' : undefined,
+      });
     }
 
-    // 2) Grade written answers (short + long) cumulatively via AI (also produces
-    //    cognitive features). Long answers are scored by how many distinct valid
-    //    points they cover vs the expected key points.
-    const shortQs = questions.filter(q => WRITTEN_TYPES.has(q.type));
+    // 2) Grade written answers (short + long) and dynamic decision MCQs cumulatively via AI
+    //    (yields cognitive telemetry for profile).
+    const shortQs = questions.filter(q => WRITTEN_TYPES.has(q.type) || (q.type === 'mcq' && (q.correctAnswer || '').toString().trim().toUpperCase() === 'AI'));
     let shortMarks = 0;
     let cognitive = null;
     let usage = { tokens: 0 };
@@ -1950,6 +1973,10 @@ app.post('/api/grade-exam', async (req, res) => {
         let a = answers[q.id];
         if (Array.isArray(a)) a = a.join(' ');
         a = (a || '').toString().trim() || '[NO ANSWER PROVIDED]';
+        if (q.type === 'mcq' && (q.correctAnswer || '').toString().trim().toUpperCase() === 'AI') {
+          const opts = Array.isArray(q.options) ? q.options.join('; ') : '';
+          return `Q${q.id} [MCQ SITUATIONAL DECISION PROBE]: ${q.question}\nOptions: ${opts}\nStudent selected option: ${a}`;
+        }
         const kp = (q.keyPoints || []).length ? `\nExpected valid points (${q.keyPoints.length}): ${q.keyPoints.join('; ')}` : '';
         const kind = q.type === 'long' ? 'LONG-ANSWER' : 'SHORT-ANSWER';
         return `Q${q.id} [${kind}, worth ${q.marks} marks]: ${q.question}${kp}\nStudent answer: ${a}`;

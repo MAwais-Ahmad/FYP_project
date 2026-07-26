@@ -254,13 +254,18 @@ export function CustomQuizScreen({ exam, onComplete, onBack, sessionId }: Custom
                     />
                 </div>
                 <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                         <span className="text-sm text-white/60">
                             Q {currentIndex + 1} of {totalQuestions}
                         </span>
                         <span className="text-xs bg-primary-500/20 text-primary-300 px-2 py-0.5 rounded-full">
                             {isProbe ? 'Not graded' : `${currentQuestion.marks} mark${currentQuestion.marks > 1 ? 's' : ''}`}
                         </span>
+                        {exam.totalMarks > 0 && (
+                            <span className="text-xs text-amber-300/80 font-medium bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                                Total: {exam.totalMarks} marks
+                            </span>
+                        )}
                         <span className={`text-[10px] px-2 py-0.5 rounded-full ${typeBadgeClass}`}>
                             {typeLabel}
                         </span>

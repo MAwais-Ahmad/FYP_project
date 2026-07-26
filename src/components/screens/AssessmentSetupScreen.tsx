@@ -18,7 +18,6 @@ interface AssessmentSetupScreenProps {
 }
 
 type SetupTab = 'select-mode' | 'custom-paper' | 'ai-material';
-type CustomPaperMode = 'upload' | 'manual';
 
 const MARKS_PER_MCQ = 1;
 const MARKS_PER_SHORT = 3;
@@ -143,21 +142,41 @@ function ManualQuestionsEditor({
                                     />
                                 ))}
                             </div>
-                            <div className="flex items-center gap-3">
-                                <label className="text-xs text-white/40">Correct Answer:</label>
-                                <div className="flex gap-2">
-                                    {['A', 'B', 'C', 'D'].map((letter) => (
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <label className="text-xs text-white/40">Correct Answer:</label>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        {['A', 'B', 'C', 'D'].map((letter) => (
+                                            <button
+                                                key={letter}
+                                                type="button"
+                                                onClick={() => updateQ(qi, 'correctAnswer', letter)}
+                                                className={`w-8 h-8 rounded-lg text-sm font-bold transition-all ${
+                                                    q.correctAnswer === letter ? 'bg-green-500 text-white shadow-lg' : 'bg-white/10 text-white/50 hover:bg-white/20'
+                                                }`}
+                                            >
+                                                {letter}
+                                            </button>
+                                        ))}
                                         <button
-                                            key={letter}
-                                            onClick={() => updateQ(qi, 'correctAnswer', letter)}
-                                            className={`w-8 h-8 rounded-lg text-sm font-bold transition-all ${
-                                                q.correctAnswer === letter ? 'bg-green-500 text-white shadow-lg' : 'bg-white/10 text-white/50 hover:bg-white/20'
+                                            type="button"
+                                            onClick={() => updateQ(qi, 'correctAnswer', 'AI')}
+                                            title="🤖 AI Dynamic Evaluation: No fixed right/wrong answer. Every valid choice receives full marks (never hurts student score) while AI extracts decision telemetry to enhance Cognitive Profiling."
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+                                                q.correctAnswer === 'AI'
+                                                    ? 'bg-purple-500/30 text-purple-200 border-purple-500/50 shadow-lg'
+                                                    : 'bg-white/10 text-white/60 hover:bg-white/20 border-white/10'
                                             }`}
                                         >
-                                            {letter}
+                                            <span>🤖</span> AI Decides
                                         </button>
-                                    ))}
+                                    </div>
                                 </div>
+                                {q.correctAnswer === 'AI' && (
+                                    <p className="text-[11px] text-purple-300/80 bg-purple-500/10 p-2 rounded-lg border border-purple-500/20">
+                                        ✨ <strong>AI Dynamic Evaluation Active:</strong> Students receive 100% full marks for any valid choice (doesn't hurt overall score), while AI evaluates situational logic to enrich their Cognitive Profile.
+                                    </p>
+                                )}
                             </div>
                         </>
                     ) : (
@@ -227,7 +246,6 @@ export function AssessmentSetupScreen({
     };
 
     // Custom Paper state
-    const [customMode, setCustomMode] = useState<CustomPaperMode>('upload');
     const [extractedText, setExtractedText] = useState('');
     const [isUploading, setIsUploading] = useState(false);
     const [isParsing, setIsParsing] = useState(false);
@@ -252,6 +270,7 @@ export function AssessmentSetupScreen({
     // Teacher's own hand-written questions merged into the AI-generated exam.
     const [bonusQuestions, setBonusQuestions] = useState<CustomExamQuestion[]>([]);
     const [difficulty, setDifficulty] = useState<ExamDifficulty>('normal');
+    const [additionalInstructions, setAdditionalInstructions] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
     const [generateError, setGenerateError] = useState('');
     const [materialFiles, setMaterialFiles] = useState<string[]>([]);
@@ -346,7 +365,29 @@ export function AssessmentSetupScreen({
 
         if (result.success && result.exam) {
             const finalTitle = examTitle.trim() || result.exam.examTitle || 'Custom Exam';
-            setPreviewExam({ ...result.exam, examTitle: finalTitle });
+            if (!examTitle.trim()) setExamTitle(finalTitle);
+
+            if (result.exam.durationMinutes && result.exam.durationMinutes > 0) {
+                setDurationMinutes(result.exam.durationMinutes);
+                setTimerEnabled(true);
+            }
+
+            const parsedQs: CustomExamQuestion[] = (result.exam.questions || [])
+                .filter((q: any) => !q.probe)
+                .map((q: any, idx: number) => ({
+                    id: idx + 1,
+                    type: q.type || 'mcq',
+                    marks: q.marks || 1,
+                    question: q.question || '',
+                    options: Array.isArray(q.options) ? q.options.map((o: string) => o.replace(/^[A-D]\)\s*/, '')) : ['', '', '', ''],
+                    correctAnswer: q.correctAnswer || 'A',
+                    explanation: q.explanation || '',
+                    keyPoints: q.keyPoints || [''],
+                }));
+
+            if (parsedQs.length > 0) {
+                setManualQuestions(parsedQs);
+            }
         } else {
             setUploadError(result.error || 'Failed to parse paper');
         }
@@ -403,6 +444,7 @@ export function AssessmentSetupScreen({
             longMarks,
             manualQuestions: bonus,
             difficulty,
+            additionalInstructions,
         });
         setIsGenerating(false);
 
@@ -707,6 +749,7 @@ export function AssessmentSetupScreen({
     }
 
     // Custom Paper Tab
+    // Custom Paper Tab (Unified File Upload + Manual Question Editor)
     if (tab === 'custom-paper') {
         return (
             <section className="min-h-screen p-4 md:p-6 relative overflow-hidden">
@@ -714,11 +757,16 @@ export function AssessmentSetupScreen({
                 <div className="floating-shape shape-2 w-72 h-72 bg-accent-500 -bottom-36 -right-36" style={{ animationDelay: '2s' }} />
 
                 <div className="max-w-3xl mx-auto space-y-6 relative z-10 pb-16">
-                    <div className="flex items-center gap-3">
-                        <button onClick={() => setTab('select-mode')} className="btn-secondary !py-2 !px-4 text-sm">
-                            ← Back
-                        </button>
-                        <h1 className="text-2xl font-bold">📄 Custom Paper</h1>
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-3">
+                            <button onClick={() => setTab('select-mode')} className="btn-secondary !py-2 !px-4 text-sm">
+                                ← Back
+                            </button>
+                            <h1 className="text-2xl font-bold">📄 Custom Paper</h1>
+                        </div>
+                        <span className="text-xs text-primary-300 bg-primary-500/10 px-3 py-1 rounded-full border border-primary-500/20">
+                            🔒 Original Paper Fidelity (Teacher Paper)
+                        </span>
                     </div>
 
                     {/* Mandatory Exam / Subject Title Card */}
@@ -737,123 +785,116 @@ export function AssessmentSetupScreen({
 
                     {renderTimerControls()}
 
-                    {/* Mode Toggle */}
-                    <div className="glass-card p-1 flex gap-1">
-                        <button
-                            onClick={() => setCustomMode('upload')}
-                            className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                                customMode === 'upload' ? 'bg-primary-500 text-white shadow-lg' : 'text-white/50 hover:text-white/80'
-                            }`}
-                        >
-                            📤 Upload File(s)
-                        </button>
-                        <button
-                            onClick={() => setCustomMode('manual')}
-                            className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                                customMode === 'manual' ? 'bg-primary-500 text-white shadow-lg' : 'text-white/50 hover:text-white/80'
-                            }`}
-                        >
-                            ✏️ Manual Entry
-                        </button>
-                    </div>
-
-                    {/* Upload Mode */}
-                    {customMode === 'upload' && (
-                        <div className="space-y-4">
-                            <div
-                                className="glass-card p-8 border-2 border-dashed border-white/20 hover:border-primary-500/40 transition-all cursor-pointer text-center"
-                                onClick={() => fileInputRef.current?.click()}
-                            >
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".pdf,.pptx,.ppt,.docx,.txt,.png,.jpg,.jpeg,.webp,.gif,.bmp,image/*"
-                                    className="hidden"
-                                    onChange={(e) => {
-                                        if (e.target.files && e.target.files.length) handleDocUpload(e.target.files, 'paper');
-                                    }}
-                                />
-                                {isUploading ? (
-                                    <div className="space-y-2">
-                                        <div className="text-4xl animate-spin">⏳</div>
-                                        <p className="text-white/60">Extracting text & Vision-OCR from document/image...</p>
-                                    </div>
-                                ) : paperFiles.length > 0 ? (
-                                    <div className="space-y-2">
-                                        <div className="text-4xl">✅</div>
-                                        <p className="text-green-300 font-semibold">{paperFiles[0]}</p>
-                                        <p className="text-white/40 text-xs">Click to replace with a different file</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        <div className="text-4xl">📤</div>
-                                        <p className="text-white/70 font-medium">Click to upload exam paper or image scan</p>
-                                        <p className="text-white/40 text-xs">1 file: PDF, Word (.docx), Image (PNG, JPG), PowerPoint, TXT (Max 15MB)</p>
-                                    </div>
-                                )}
-                            </div>
-
-                            {extractedText && (
-                                <div className="glass-card p-4 space-y-3">
-                                    <h3 className="font-semibold text-sm">📖 Extracted Text Preview</h3>
-                                    <pre className="text-xs text-white/50 max-h-32 overflow-y-auto whitespace-pre-wrap bg-white/5 p-3 rounded-lg">
-                                        {extractedText.substring(0, 1000)}
-                                        {extractedText.length > 1000 && '...'}
-                                    </pre>
-                                    <button
-                                        onClick={handleParsePaper}
-                                        disabled={isParsing}
-                                        className="btn-primary w-full !py-3 disabled:opacity-50"
-                                    >
-                                        {isParsing ? (
-                                            <><span className="animate-spin">🤖</span> AI is parsing questions...</>
-                                        ) : (
-                                            '🔍 Extract Questions with AI'
-                                        )}
-                                    </button>
-                                </div>
+                    {/* File Upload Section (Optional Document Source) */}
+                    <div className="glass-card p-5 space-y-3 border border-white/10">
+                        <div className="flex items-center justify-between">
+                            <h3 className="font-semibold text-sm flex items-center gap-2">
+                                <span>📤</span> Upload Exam Paper or Scan <span className="text-white/40 font-normal text-xs">(optional)</span>
+                            </h3>
+                            {paperFiles.length > 0 && (
+                                <span className="text-xs text-green-300 bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/20">
+                                    {paperFiles[0]}
+                                </span>
                             )}
-
-                            {uploadError && (
-                                <div className="glass-card p-4 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl space-y-2 text-sm">
-                                    <div className="flex items-center gap-2 font-bold text-amber-300">
-                                        <span className="text-xl">🤖</span> AITA AI Assistant Guidance
-                                    </div>
-                                    <p className="text-white/80 text-xs leading-relaxed">{uploadError.replace(/^🤖\s*AITA\s*AI\s*Assistant:\s*/i, '')}</p>
-                                    <div className="text-[11px] text-white/50 pt-1 border-t border-amber-500/20">
-                                        💡 <strong>Tip for Teachers:</strong> If your photo is dim or blurry, use a document scanner app like <strong>CamScanner</strong> or <strong>Adobe Scan</strong> for a sharp, high-contrast shot, or convert/type the content into a PDF, Word, or TXT file.
-                                    </div>
+                        </div>
+                        <div
+                            className="p-6 border-2 border-dashed border-white/20 hover:border-primary-500/40 transition-all cursor-pointer text-center rounded-xl bg-white/5"
+                            onClick={() => fileInputRef.current?.click()}
+                        >
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".pdf,.pptx,.ppt,.docx,.txt,.png,.jpg,.jpeg,.webp,.gif,.bmp,image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                    if (e.target.files && e.target.files.length) handleDocUpload(e.target.files, 'paper');
+                                }}
+                            />
+                            {isUploading ? (
+                                <div className="space-y-2">
+                                    <div className="text-3xl animate-spin">⏳</div>
+                                    <p className="text-white/60 text-xs">Extracting text & Vision-OCR from document/image...</p>
+                                </div>
+                            ) : paperFiles.length > 0 ? (
+                                <div className="space-y-1">
+                                    <div className="text-2xl">✅</div>
+                                    <p className="text-green-300 font-semibold text-xs">{paperFiles[0]}</p>
+                                    <p className="text-white/40 text-[11px]">Click to replace file</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-1">
+                                    <div className="text-2xl">📤</div>
+                                    <p className="text-white/70 font-medium text-xs">Click to upload exam paper or image scan</p>
+                                    <p className="text-white/40 text-[11px]">PDF, Word (.docx), Image (PNG, JPG), PowerPoint, TXT (Max 15MB)</p>
                                 </div>
                             )}
                         </div>
-                    )}
 
-                    {/* Manual Entry Mode */}
-                    {customMode === 'manual' && (
-                        <div className="space-y-4">
-                            <ManualQuestionsEditor questions={manualQuestions} onChange={setManualQuestions} />
-
-                            {uploadError && (
-                                <div className="glass-card p-4 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl text-sm">
-                                    <p className="text-white/80 text-xs leading-relaxed">{uploadError.replace(/^🤖\s*AITA\s*AI\s*Assistant:\s*/i, '')}</p>
-                                </div>
-                            )}
-
-                            <div className="glass-card p-4 flex items-center justify-between flex-wrap gap-2">
-                                <div className="text-sm text-white/60">
-                                    <span className="font-semibold text-white">{manualQuestions.length}</span> questions •{' '}
-                                    <span className="font-semibold text-white">{manualTotalMarks}</span> total marks
-                                </div>
+                        {extractedText && (
+                            <div className="p-3 rounded-xl bg-white/5 space-y-2 border border-white/5">
+                                <h4 className="font-semibold text-xs text-white/70">📖 Extracted Text Preview</h4>
+                                <pre className="text-[11px] text-white/50 max-h-24 overflow-y-auto whitespace-pre-wrap bg-black/20 p-2 rounded-lg">
+                                    {extractedText.substring(0, 800)}
+                                    {extractedText.length > 800 && '...'}
+                                </pre>
                                 <button
-                                    onClick={handleStartManualExam}
-                                    disabled={manualQuestions.filter(q => q.question.trim()).length === 0}
-                                    className="btn-primary !py-2.5 !px-6 disabled:opacity-50"
+                                    onClick={handleParsePaper}
+                                    disabled={isParsing}
+                                    className="btn-secondary w-full !py-2 text-xs disabled:opacity-50 !text-primary-300 hover:!bg-primary-500/10"
                                 >
-                                    {sessionAuthor ? '✅ Use for Session' : '🚀 Start Exam'}
+                                    {isParsing ? (
+                                        <><span className="animate-spin">🤖</span> AI is extracting questions into editor below...</>
+                                    ) : (
+                                        '🔍 Extract Questions into Editor Below'
+                                    )}
                                 </button>
                             </div>
+                        )}
+                    </div>
+
+                    {uploadError && (
+                        <div className="glass-card p-4 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl space-y-2 text-sm">
+                            <div className="flex items-center gap-2 font-bold text-amber-300">
+                                <span className="text-xl">🤖</span> AITA AI Assistant Guidance
+                            </div>
+                            <p className="text-white/80 text-xs leading-relaxed">{uploadError.replace(/^🤖\s*AITA\s*AI\s*Assistant:\s*/i, '')}</p>
                         </div>
                     )}
+
+                    {/* Manual & Extracted Questions Editor */}
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <h3 className="font-semibold text-base flex items-center gap-2">
+                                <span>✏️</span> Exam Questions Editor
+                            </h3>
+                            <span className="text-xs text-white/40">
+                                {manualQuestions.length} Question{manualQuestions.length === 1 ? '' : 's'} • {manualTotalMarks} Marks Total
+                            </span>
+                        </div>
+
+                        <ManualQuestionsEditor questions={manualQuestions} onChange={setManualQuestions} />
+                    </div>
+
+                    {/* Unified Footer Summary & Action Bar */}
+                    <div className="glass-card p-4 flex items-center justify-between flex-wrap gap-3 border border-primary-500/20 bg-white/5 sticky bottom-4 z-20 shadow-2xl">
+                        <div className="text-sm text-white/70 space-y-0.5">
+                            <div className="font-semibold text-white flex items-center gap-2 text-base">
+                                <span>📝 {manualQuestions.filter(q => q.question.trim()).length} Question{manualQuestions.filter(q => q.question.trim()).length === 1 ? '' : 's'}</span>
+                                <span className="text-white/20">•</span>
+                                <span className="text-primary-300">{manualTotalMarks} Total Marks</span>
+                            </div>
+                            <div className="text-xs text-white/40">
+                                Timer: {timerEnabled ? `${durationMinutes} mins (${timerMode})` : 'Disabled'}
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleStartManualExam}
+                            disabled={manualQuestions.filter(q => q.question.trim()).length === 0}
+                            className="btn-primary !py-3 !px-8 text-base shadow-lg disabled:opacity-50"
+                        >
+                            {sessionAuthor ? '✅ Use for Session' : '🚀 Start Exam'}
+                        </button>
+                    </div>
                 </div>
             </section>
         );
@@ -1009,12 +1050,12 @@ export function AssessmentSetupScreen({
 
                         {/* Difficulty */}
                         <div className="space-y-2">
-                            <label className="text-sm text-white/70">Difficulty Level (Bloom's Taxonomy)</label>
+                            <label className="text-sm text-white/70">Difficulty Level & Question Cognitive Strategy</label>
                             <div className="grid grid-cols-3 gap-2">
                                 {([
-                                    { key: 'easy', label: '🟢 Easy', desc: 'Recall & Basics' },
-                                    { key: 'normal', label: '🟡 Normal', desc: 'Balanced Application' },
-                                    { key: 'hard', label: '🔴 Hard', desc: 'Critical Analysis' },
+                                    { key: 'easy', label: '🟢 Easy', desc: 'Direct Recall & Definitions' },
+                                    { key: 'normal', label: '🟡 Normal', desc: 'Applied Theory Scenarios' },
+                                    { key: 'hard', label: '🔴 Hard', desc: 'Complex Scenarios & Distractors' },
                                 ] as const).map((d) => (
                                     <button
                                         key={d.key}
@@ -1031,6 +1072,34 @@ export function AssessmentSetupScreen({
                                     </button>
                                 ))}
                             </div>
+                        </div>
+
+                        {/* Additional AI Instructions (Highest Priority Override Directive) */}
+                        <div className="space-y-2 pt-3 border-t border-white/10">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-semibold text-white/80 uppercase tracking-wider flex items-center gap-1.5">
+                                    <span>💬</span> Additional AI Instructions / Directives <span className="text-white/40 font-normal text-[10px] lowercase">(optional)</span>
+                                </label>
+                                <span className="text-xs text-white/40">
+                                    {additionalInstructions.trim() ? additionalInstructions.trim().split(/\s+/).filter(Boolean).length : 0} / 50 words
+                                </span>
+                            </div>
+                            <textarea
+                                value={additionalInstructions}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    const words = val.trim().split(/\s+/).filter(Boolean);
+                                    if (words.length <= 50 || val.length < additionalInstructions.length) {
+                                        setAdditionalInstructions(val);
+                                    }
+                                }}
+                                placeholder="e.g. 'Focus on cybersecurity protocols', 'Include Python code snippets', 'Make questions easy with no wrong answers'..."
+                                className="text-input text-xs min-h-[65px] resize-y"
+                                rows={2}
+                            />
+                            <p className="text-[11px] text-amber-300/80 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
+                                ⚡ <strong>Priority Override Active:</strong> Instructions written here take <strong>TOP PRIORITY</strong> over default difficulty settings if a conflict occurs.
+                            </p>
                         </div>
                     </div>
 
