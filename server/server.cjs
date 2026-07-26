@@ -2396,7 +2396,11 @@ app.post('/api/chat', async (req, res) => {
             databaseContextStr = '\n\nDATABASE STUDENT RECORDS SUMMARY:\n' + matching.map(r => {
               const name = r.user?.name || 'Anonymous Student';
               const date = new Date(r.date).toLocaleDateString();
-              return `- Student: ${name} | Date: ${date} | Score: ${r.performanceScore}% | Category: ${r.primaryName} | Decision Style: ${r.decisionStyle} | Avg Time: ${r.avgResponseTime}s`;
+              // performanceScore is stored on a 0-1 scale; render as a whole percentage.
+              const scorePct = r.performanceScore != null
+                ? `${Math.round((r.performanceScore <= 1 ? r.performanceScore * 100 : r.performanceScore))}%`
+                : 'N/A';
+              return `- Student: ${name} | Date: ${date} | Score: ${scorePct} | Category: ${r.primaryName} | Decision Style: ${r.decisionStyle} | Avg Time: ${r.avgResponseTime}s`;
             }).join('\n');
           }
         }
