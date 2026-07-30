@@ -227,7 +227,7 @@ export function ResultsScreen({
             <div className="glass-card p-6 space-y-4">
                 <div>
                     <h2 className="text-lg font-semibold flex items-center gap-2">📊 ML Feature Vector</h2>
-                    <p className="text-white/50 text-xs mt-1">These raw features feed the Random Forest classifier</p>
+                    <p className="text-white/50 text-xs mt-1">These raw features feed the rule-based classifier</p>
                 </div>
                 <div className="grid md:grid-cols-3 gap-6 text-sm">
                     {/* Timing */}
